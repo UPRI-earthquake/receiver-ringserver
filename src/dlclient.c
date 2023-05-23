@@ -81,6 +81,9 @@ DLHandleCmd (ClientInfo *cinfo)
   if (!strncmp (cinfo->recvbuf, "WRITE", 5))
   {
     /* Check for write permission */
+    /* NOTE: if client has writeperm (see conf WriteIP), then that overrides token requirement,
+     * meaning they may send even without AUTHORIZATION command
+     */
     if (!cinfo->writeperm && !cinfo->jwttoken)
     {
       lprintf (1, "[%s] Data packet received from client without write permission",
