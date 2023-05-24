@@ -86,9 +86,9 @@ DLHandleCmd (ClientInfo *cinfo)
      */
     if (!cinfo->writeperm && !cinfo->jwttoken)
     {
-      lprintf (1, "[%s] Data packet received from client without write permission",
+      lprintf (1, "[%s] WRITE_ERR: Data packet received from client without write permission",
                cinfo->hostname);
-      SendPacket (cinfo, "ERROR", "Write permission not granted, no soup for you!", 0, 1, 1);
+      SendPacket (cinfo, "ERROR", "WRITE_ERR: Write permission not granted, missing writeperm or token", 0, 1, 1);
       return -1;
     }
     /* Any errors from HandleWrite are fatal */
@@ -591,9 +591,9 @@ HandleNegotiation (ClientInfo *cinfo)
 
     else if (size > DLMAXREGEXLEN)
     {
-      lprintf (0, "[%s] auth token too large (%)", cinfo->hostname, size);
+      lprintf (0, "[%s] AUTH_ERR: Authorization token too large (%)", cinfo->hostname, size);
 
-      snprintf (sendbuffer, sizeof (sendbuffer), "authorization token too large, must be <= %d",
+      snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_ERR: Authorization token too large, must be <= %d",
                 DLMAXREGEXLEN);
       if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
         return -1;
@@ -603,10 +603,10 @@ HandleNegotiation (ClientInfo *cinfo)
     else
     {
       if ( ! authdir) {
-        lprintf (0, "[%s] cannot authorize for write, auth not configured", cinfo->hostname);
+        lprintf (0, "[%s] AUTH_ERR: Cannot authorize for write, auth not configured", cinfo->hostname);
 
         snprintf (sendbuffer, sizeof (sendbuffer),
-            "[%s] cannot authorize for write, auth not configured", cinfo->hostname);
+            "[%s] AUTH_ERR: cannot authorize for write, auth not configured", cinfo->hostname);
         if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
           return -1;
 
@@ -678,13 +678,11 @@ HandleNegotiation (ClientInfo *cinfo)
         ret = jwt_decode(&jwt, jwt_str, key, key_len);
 
         if (ret != 0) {
-            lprintf (0, "[%s] cannot parse/verify auth token %d %s '%s'", cinfo->hostname, ret, strerror (ret), jwt_str);
-            lprintf (0, "%s", jwt_str);
-            lprintf (0, "%s", key);
+            lprintf (0, "[%s] AUTH_ERR: Token failed verification %d %s", cinfo->hostname, ret, strerror (ret));
+            //lprintf (0, "%s", jwt_str);
+            //lprintf (0, "%s", key);
 
-            snprintf (sendbuffer, sizeof (sendbuffer),
-                "[%s] cannot parse/verify auth token '%s'", cinfo->hostname, jwt_str);
-            if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
+            if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Token failed verification", 0, 1, 1))
               return -1;
 
             OKGO = 0;
@@ -695,10 +693,10 @@ HandleNegotiation (ClientInfo *cinfo)
         time_t currTime = time(NULL);
         if (currTime >  jwt_get_grant_int(jwt, "exp")) {
           // jwt_get_grant_int returns 0 is not exist, so no exp => fail
-          lprintf (1, "[%s] Token expired: %d > %d",
+          lprintf (1, "[%s] AUTH_ERR: Token expired: %d > %d",
                    cinfo->hostname, currTime, jwt_get_grant_int(jwt, "exp"));
 
-          SendPacket (cinfo, "ERROR", "Token expired", 0, 1, 1);
+          SendPacket (cinfo, "ERROR", "AUTH_ERR: Token expired", 0, 1, 1);
           return -1;
         }
 
@@ -707,21 +705,23 @@ HandleNegotiation (ClientInfo *cinfo)
         free(jwt_str);
         /* Compile write expression */
         cinfo->writepatternstr = jwt_get_grant(cinfo->jwttoken, "wpat");
-        lprintf (0, "JWTToken: writepattern: %s", cinfo->writepatternstr);
 
         const char *errptr;
         int erroffset;
         cinfo->writepattern = pcre_compile (cinfo->writepatternstr, 0, &errptr, &erroffset, NULL);
         if (errptr)
         {
-          lprintf (0, "JWTToken: Error with pcre_compile: %s (offset: %d)", errptr, erroffset);
+          lprintf (0, "[%s] AUTH_ERR: Error with pcre_compile: %s (offset: %d)", cinfo->hostname, errptr, erroffset);
 
-          if (SendPacket (cinfo, "ERROR", "Error with jwt write expression", 0, 1, 1))
+          if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Error with jwt write expression", 0, 1, 1))
             return -1;
         }
         else
         {
-          snprintf (sendbuffer, sizeof (sendbuffer), "auth for write granted");
+          lprintf (0, "[%s] AUTH_OK: Granted authorization to WRITE on: %s", cinfo->hostname, cinfo->writepatternstr);
+
+          snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_OK: Granted authorization to WRITE on %s",
+              cinfo->writepatternstr);
           if (SendPacket (cinfo, "OK", sendbuffer, 0, 1, 1))
             return -1;
         }
@@ -791,37 +791,42 @@ HandleWrite (ClientInfo *cinfo)
               streamid, &(cinfo->packet.datastart), &(cinfo->packet.dataend),
               flags, &(cinfo->packet.datasize)) != 5)
   {
-    lprintf (1, "[%s] Error parsing WRITE parameters: %.100s",
+    lprintf (1, "[%s] WRITE_ERR: Error parsing WRITE parameters: %.100s",
              cinfo->hostname, cinfo->recvbuf);
 
-    SendPacket (cinfo, "ERROR", "Error parsing WRITE command parameters", 0, 1, 1);
+    SendPacket (cinfo, "ERROR", "WRITE_ERR: Error parsing WRITE command parameters", 0, 1, 1);
 
     return -1;
   }
 
   if (cinfo->jwttoken && cinfo->writepattern) {
+      /* Check if token is expired */
       time_t currTime = time(NULL);
       if (currTime >  jwt_get_grant_int(cinfo->jwttoken, "exp")) {
         // jwt_get_grant_int returns 0 is not exist, so no exp => fail
-        lprintf (1, "[%s] Token expired for WRITE streamid: %.100s %d > %d",
-                 cinfo->hostname, streamid, currTime, jwt_get_grant_int(cinfo->jwttoken, "exp"));
+        lprintf (1, "[%s] WRITE_ERR: Token expired: %d > %d",
+                 cinfo->hostname, currTime, jwt_get_grant_int(cinfo->jwttoken, "exp"));
 
-        SendPacket (cinfo, "ERROR", "Token expired WRITE streamid", 0, 1, 1);
+        snprintf (replystr, sizeof (replystr), "WRITE_ERR: Token expired");
+        SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
         return -1;
       }
+
+      /* Check if streamid in token matches streamid of packet to be written */
       pcre_result = pcre_exec (cinfo->writepattern, match_extra, streamid, strlen (streamid), 0, 0, NULL, 0);
       if(pcre_result<0) {
           // PCRE_ERROR_NOMATCH=-1
-          lprintf (1, "[%s] Token not auth to WRITE streamid: %.100s  %d",
+          lprintf (1, "[%s] WRITE_ERR: Token not authorized to WRITE streamid: %s, pcre_result: %d",
                    cinfo->hostname, streamid, pcre_result);
 
-          SendPacket (cinfo, "ERROR", "Token not auth to WRITE streamid", 0, 1, 1);
+          snprintf (replystr, sizeof (replystr), "WRITE_ERR: Token not authorized to WRITE on %s", streamid);
+          SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
           if (match_extra) {
             pcre_free(match_extra);
           }
           return -1;
       } else {
-          lprintf (3, "[%s] Token auth ok to WRITE streamid: %.100s   %d",
+          lprintf (3, "[%s]: Token authorized to WRITE on streamid: %s, pcre_result: %d",
                    cinfo->hostname, streamid, pcre_result);
           if (match_extra) {
              pcre_free(match_extra);
@@ -938,7 +943,7 @@ HandleWrite (ClientInfo *cinfo)
   /* Send acknowledgement if requested (flags contain 'A') */
   if (strchr (flags, 'A'))
   {
-    if (SendPacket (cinfo, "OK", NULL, cinfo->packet.pktid, 1, 1))
+    if (SendPacket (cinfo, "OK", "WRITE_OK: Packet written in server", cinfo->packet.pktid, 1, 1))
       return -1;
   }
 
