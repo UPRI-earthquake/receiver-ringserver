@@ -26,6 +26,13 @@
 #define VERIFICATION_INVALID_ROLE       132
 #define VERIFICATION_EXPIRED_TOKEN      133
 
+#define INBEHALF_VERIFICATION_SUCCESS            40
+#define INBEHALF_VERIFICATION_SUCCESS_NEW_TOKEN  41
+#define INBEHALF_VERIFICATION_ERROR              140
+#define INBEHALF_VERIFICATION_INVALID_TOKEN      141
+#define INBEHALF_VERIFICATION_INVALID_ROLE       142
+#define INBEHALF_VERIFICATION_EXPIRED_TOKEN      143
+
 // Define the default messages for each response status code
 #define GENERIC_SUCCESS_MSG                 "Success"
 #define GENERIC_ERROR_MSG                   "Error"

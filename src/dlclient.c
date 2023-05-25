@@ -935,7 +935,7 @@ HandleNegotiation (ClientInfo *cinfo)
     lprintf(0, "response code = %d", response_code);
 
     int ret = 0;
-    if (response_code == VERIFICATION_SUCCESS)
+    if (response_code == INBEHALF_VERIFICATION_SUCCESS)
     {
       lprintf (1, "[%s] AUTH_OK: Granted authorization to WRITE on: %s", cinfo->hostname, cinfo->writepatternstr);
       snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_OK: Granted authorization to WRITE on %s",
@@ -945,7 +945,7 @@ HandleNegotiation (ClientInfo *cinfo)
       if (SendPacket (cinfo, "OK", sendbuffer, 0, 1, 1))
         ret = -1;
     }
-    else if (response_code == VERIFICATION_SUCCESS_NEW_TOKEN)
+    else if (response_code == INBEHALF_VERIFICATION_SUCCESS_NEW_TOKEN)
     {
       lprintf (1, "[%s] AUTH_OK: Granted authorization to WRITE on: %s, added to list of devices", cinfo->hostname, cinfo->writepatternstr);
       snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_OK: Granted authorization to WRITE on %s, added to list of devices",
@@ -957,19 +957,19 @@ HandleNegotiation (ClientInfo *cinfo)
 
       // TODO: Update bearertoken
     }
-    else if (response_code == VERIFICATION_INVALID_TOKEN)
+    else if (response_code == INBEHALF_VERIFICATION_INVALID_TOKEN)
     {
       lprintf (0, "[%s] AUTH_ERR: Invalid token", cinfo->hostname);
       if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Invalid token", 0, 1, 1))
         ret = -1;
     }
-    else if (response_code == VERIFICATION_INVALID_ROLE)
+    else if (response_code == INBEHALF_VERIFICATION_INVALID_ROLE)
     {
       lprintf (0, "[%s] AUTH_ERR: Role in token is invalid", cinfo->hostname);
       if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Role in token is invalid", 0, 1, 1))
         ret = -1;
     }
-    else if (response_code == VERIFICATION_EXPIRED_TOKEN)
+    else if (response_code == INBEHALF_VERIFICATION_EXPIRED_TOKEN)
     {
       lprintf (0, "[%s] AUTH_ERR: Expired token", cinfo->hostname);
       if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Expired token", 0, 1, 1))
@@ -977,7 +977,7 @@ HandleNegotiation (ClientInfo *cinfo)
     }
     else
     {
-      // TODO: Other cases such as AUTHENTICATION cases for bearertoken
+      // TODO: Other cases such as the VERIFICATION cases for bearertoken
       lprintf (0, "[%s] AUTH_ERR: Error requesting token verification from %s", cinfo->hostname, authserver);
       snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_ERR: Error requesting token verification from %s",
           authserver);
