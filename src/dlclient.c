@@ -36,6 +36,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
+#include <curl/curl.h>
 
 #include <libmseed.h>
 #include <mxml.h>
@@ -61,6 +62,118 @@ static int SendPacket (ClientInfo *cinfo, char *header, char *data,
                        int64_t value, int addvalue, int addsize);
 static int SendRingPacket (ClientInfo *cinfo);
 static int SelectedStreams (RingParams *ringparams, RingReader *reader);
+
+// helper functions and structs
+// Structure to hold the response received from the authentication server
+struct MemoryStruct {
+  char *memory;
+  size_t size;
+};
+static int requestTokenVerification(char *authserver, char *bearertoken, char *jwt_str, struct MemoryStruct *resp);
+
+/***********************************************************************
+ * WriteMemoryCallback:
+ *
+ * Callback function for CURLOPT_WRITEFUNCTION. Writes received content
+ * into user-defined data userp.
+ *
+ * Returns zero on success, negative value on error.  On success the
+ * JSON response is written in resp.
+ ***********************************************************************/
+size_t WriteMemoryCallback(void *receivedContents, size_t size, size_t nmemb, void *userp) {
+  struct MemoryStruct *userStorage = (struct MemoryStruct *)userp; // recast to correct type
+  size_t realsize = size * nmemb;
+
+  // allocate memory with correct size, +1 for null terminator
+  char *ptr = realloc(userStorage->memory, userStorage->size + realsize + 1);
+  if (ptr == NULL) {
+    /* Out of memory! */
+    printf("Not enough memory (realloc returned NULL)\n");
+    return 0;
+  }
+
+  userStorage->memory = ptr; // assign to allocated memory
+  // copy receivedContents to userStorage, starting on its current size (may be zero)
+  memcpy(&(userStorage->memory[userStorage->size]), receivedContents, realsize);
+  userStorage->size += realsize; // increment size with amount copied
+  userStorage->memory[userStorage->size] = '\0'; // add null terminator to be a valid C str
+
+  return realsize; // return number of bytes written
+}
+
+// Function to handle the authentication response
+void handleAuthResponse(const char *response) {
+  // Handle the authentication response here
+  lprintf(1, "Response: %s\n", response);
+}
+
+/***********************************************************************
+ * requestTokenVerification:
+ *
+ * Sends an HTTPS POST request to the authserver with the jwt_str as a
+ * payload to be verified, and bearertoken is for accessing the
+ * authserver endpoint (our own authorization token).
+ *
+ * Returns zero on success, negative value on error.  On success the
+ * JSON response is written in resp.memory as a string.
+ ***********************************************************************/
+
+int requestTokenVerification(char *authserver, char *bearertoken, char *jwt_str, struct MemoryStruct *resp) {
+  CURL *curl;
+  CURLcode res;
+  int ret = -1;
+
+  /* Initialize libcurl */
+  res = curl_global_init(CURL_GLOBAL_DEFAULT);
+
+  /* get a curl handle */
+  curl = curl_easy_init(); // single request
+
+  if (curl) {
+    // Set the target URL
+    curl_easy_setopt(curl, CURLOPT_URL, authserver);
+
+    // Set the request headers
+    struct curl_slist *headers = NULL;
+
+    size_t authHeaderSize = sizeof("Authorization: Bearer ") + strlen(bearertoken) + 1;
+    char* authHeader = (char*)malloc(authHeaderSize);
+    snprintf(authHeader, authHeaderSize, "Authorization: Bearer %s", bearertoken);
+
+    headers = curl_slist_append(headers, authHeader);
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+
+    // Set the callback function to parse the response
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)resp);
+
+    // Set the request payload
+    char jsonPayload[256];
+    snprintf(jsonPayload, sizeof(jsonPayload), "{\"token\": \"%s\"}", jwt_str);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, jsonPayload);
+
+    // Perform the POST request
+    res = curl_easy_perform(curl);
+    if (res != CURLE_OK) {
+      fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+    } else {
+      ret = 0;
+    }
+
+    // Clean up
+    free(authHeader);
+    curl_easy_cleanup(curl);
+    curl_slist_free_all(headers);
+  }
+
+  curl_global_cleanup();
+
+  return ret;
+}
+
+
 
 /***********************************************************************
  * DLHandleCmd:
@@ -585,10 +698,9 @@ HandleNegotiation (ClientInfo *cinfo)
     {
       if (SendPacket (cinfo, "ERROR", "AUTHORIZATION requires a single argument", 0, 1, 1))
         return -1;
-
-      OKGO = 0;
     }
 
+    /* Check received token size */
     else if (size > DLMAXREGEXLEN)
     {
       lprintf (0, "[%s] AUTH_ERR: Authorization token too large (%)", cinfo->hostname, size);
@@ -597,10 +709,8 @@ HandleNegotiation (ClientInfo *cinfo)
                 DLMAXREGEXLEN);
       if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
         return -1;
-
-      OKGO = 0;
     }
-    else
+    else if (0) // disable for now
     {
       if ( ! authdir) {
         lprintf (0, "[%s] AUTH_ERR: Cannot authorize for write, auth not configured", cinfo->hostname);
@@ -618,9 +728,12 @@ HandleNegotiation (ClientInfo *cinfo)
         FILE *fp;
         unsigned char key[16384];
         int key_len = 0;
+
         char *jwt_str = NULL;
         jwt_t *jwt = NULL;
+
         int ret;
+
         if (cinfo->jwttoken)
           jwt_free( cinfo->jwttoken);
 
@@ -722,9 +835,79 @@ HandleNegotiation (ClientInfo *cinfo)
 
           snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_OK: Granted authorization to WRITE on %s",
               cinfo->writepatternstr);
-          if (SendPacket (cinfo, "OK", sendbuffer, 0, 1, 1))
+         if (SendPacket (cinfo, "OK", sendbuffer, 0, 1, 1))
             return -1;
         }
+      }
+    }
+    else
+    {
+      char* authserver = "http://172.22.0.3:5000/accounts/verifySensorToken";
+      char* bearertoken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6InRlc3QiLCJzdHJlYW1pZHMiOiJBTV9SRTcyMl8wMF9FSFosQU1fUjNCMkRfMDBfRUhaIiwicm9sZSI6ImJyZ3kiLCJpYXQiOjE2ODA3OTIwNTl9.WKwPChLjPbVl5zRKX9pdbDnzSF7ftbTwC7pw6rEflIk";
+
+      /* Check if AuthServer is configured */
+      if ( ! authserver) {
+        lprintf (0, "[%s] AUTH_ERR: Cannot authorize for write, AuthServer not configured", cinfo->hostname);
+
+        snprintf (sendbuffer, sizeof (sendbuffer),
+            "[%s] AUTH_ERR: cannot authorize for write, AuthServer not configured", cinfo->hostname);
+        if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
+          return -1;
+
+      /* Check if BearerToken is configured */
+      } else if (! bearertoken) {
+        lprintf (0, "[%s] AUTH_ERR: Cannot authorize for write, BearerToken not configured", cinfo->hostname);
+
+        snprintf (sendbuffer, sizeof (sendbuffer),
+            "[%s] AUTH_ERR: cannot authorize for write, BearerToken not configured", cinfo->hostname);
+        if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
+          return -1;
+
+      } else {
+        char *jwt_str = NULL;
+        int ret = -1; // for delaying return to allow for cleanup
+
+        /* Erase any recently stored token for this connection */
+        if (cinfo->jwttoken)
+          jwt_free( cinfo->jwttoken);
+
+        /* Read regex of size bytes from socket */
+        if (!(jwt_str = (char *)malloc (size + 1)))
+        {
+          lprintf (0, "[%s] Error allocating memory", cinfo->hostname);
+          return ret;
+        }
+
+        /* Read token from AUTHORIZATION command data */
+        if (RecvData (cinfo, jwt_str, size) < 0)
+        {
+          lprintf (0, "[%s] Error Recv'ing data", cinfo->hostname);
+          free(jwt_str);
+          return ret;
+        }
+
+        /* Make sure buffer is a terminated string */
+        jwt_str[size] = '\0';
+
+        // TODO: Check bearertoken size
+        struct MemoryStruct response;
+        response.memory = malloc(1); // Return a pointer to at least 1 block, will be resized dynamically
+        response.size = 0;
+        if (requestTokenVerification(authserver, bearertoken, jwt_str, &response))
+        {
+          lprintf (0, "[%s] Error requesting verification from %s", cinfo->hostname, authserver);
+        }
+        else
+        {
+          handleAuthResponse(response.memory);
+          ret = 0;
+        }
+
+        free(response.memory);
+        free(jwt_str);
+
+        return ret;
+
       }
     }
   }
