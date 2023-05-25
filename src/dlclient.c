@@ -875,6 +875,8 @@ HandleNegotiation (ClientInfo *cinfo)
       }
     }
 
+    // TODO: Check bearertoken size
+
     /* Proceed to token verification */
 
 
@@ -901,7 +903,6 @@ HandleNegotiation (ClientInfo *cinfo)
     /* Make sure buffer is a terminated string */
     jwt_str[size] = '\0';
 
-    // TODO: Check bearertoken size
 
     struct MemoryStruct response;
     response.memory = malloc(1); // Return a pointer to at least 1 block, will be resized dynamically
@@ -933,9 +934,62 @@ HandleNegotiation (ClientInfo *cinfo)
     int response_code = json_integer_value(json_object_get(json_object, "status"));
     lprintf(0, "response code = %d", response_code);
 
+    int ret = 0;
+    if (response_code == VERIFICATION_SUCCESS)
+    {
+      lprintf (1, "[%s] AUTH_OK: Granted authorization to WRITE on: %s", cinfo->hostname, cinfo->writepatternstr);
+      snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_OK: Granted authorization to WRITE on %s",
+          cinfo->writepatternstr);
+      // TODO: add to jwttoken and writepattern
+
+      if (SendPacket (cinfo, "OK", sendbuffer, 0, 1, 1))
+        ret = -1;
+    }
+    else if (response_code == VERIFICATION_SUCCESS_NEW_TOKEN)
+    {
+      lprintf (1, "[%s] AUTH_OK: Granted authorization to WRITE on: %s, added to list of devices", cinfo->hostname, cinfo->writepatternstr);
+      snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_OK: Granted authorization to WRITE on %s, added to list of devices",
+          cinfo->writepatternstr);
+      // TODO: add to jwttoken and writepattern
+
+      if (SendPacket (cinfo, "OK", sendbuffer, 0, 1, 1))
+        ret = -1;
+
+      // TODO: Update bearertoken
+    }
+    else if (response_code == VERIFICATION_INVALID_TOKEN)
+    {
+      lprintf (0, "[%s] AUTH_ERR: Invalid token", cinfo->hostname);
+      if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Invalid token", 0, 1, 1))
+        ret = -1;
+    }
+    else if (response_code == VERIFICATION_INVALID_ROLE)
+    {
+      lprintf (0, "[%s] AUTH_ERR: Role in token is invalid", cinfo->hostname);
+      if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Role in token is invalid", 0, 1, 1))
+        ret = -1;
+    }
+    else if (response_code == VERIFICATION_EXPIRED_TOKEN)
+    {
+      lprintf (0, "[%s] AUTH_ERR: Expired token", cinfo->hostname);
+      if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Expired token", 0, 1, 1))
+        ret = -1;
+    }
+    else
+    {
+      // TODO: Other cases such as AUTHENTICATION cases for bearertoken
+      lprintf (0, "[%s] AUTH_ERR: Error requesting token verification from %s", cinfo->hostname, authserver);
+      snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_ERR: Error requesting token verification from %s",
+          authserver);
+      if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
+        ret = -1;
+    }
+
     free(response.memory);
     free(jwt_str);
+    return ret;
   }
+
   /* BYE - End connection */
   else if (!strncasecmp (cinfo->recvbuf, "BYE", 3))
   {
