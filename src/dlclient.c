@@ -692,20 +692,28 @@ HandleNegotiation (ClientInfo *cinfo)
     /* Make sure we got a single pattern or no pattern */
     if (fields > 1)
     {
-      if (SendPacket (cinfo, "ERROR", "AUTHORIZATION requires a single argument", 0, 1, 1))
+      if (SendPacket (cinfo, "ERROR", "AUTHORIZATION requires a single argument", 0, 1, 1)){
         return -1;
+      } else {
+        return 0; // means negotiation completed (we've responded)
+      }
     }
+
     /* Check received token size */
-    else if (size > DLMAXREGEXLEN)
+    if (size > DLMAXREGEXLEN)
     {
       lprintf (0, "[%s] AUTH_ERR: Authorization token too large (%)", cinfo->hostname, size);
 
       snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_ERR: Authorization token too large, must be <= %d",
                 DLMAXREGEXLEN);
-      if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
+      if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1)) {
         return -1;
+      } else {
+        return 0;
+      }
     }
-    else if (0) // disable for now
+
+    if (0) // disable for now
     {
       if ( ! authdir) {
         lprintf (0, "[%s] AUTH_ERR: Cannot authorize for write, auth not configured", cinfo->hostname);
@@ -835,97 +843,99 @@ HandleNegotiation (ClientInfo *cinfo)
         }
       }
     }
-    else // request token verification
+
+    char* authserver = "http://172.22.0.3:5000/accounts/verifySensorToken";
+    char* bearertoken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6InRlc3QiLCJzdHJlYW1pZHMiOiJBTV9SRTcyMl8wMF9FSFosQU1fUjNCMkRfMDBfRUhaIiwicm9sZSI6ImJyZ3kiLCJpYXQiOjE2ODA3OTIwNTl9.WKwPChLjPbVl5zRKX9pdbDnzSF7ftbTwC7pw6rEflIk";
+
+    /* Check if AuthServer is configured */
+    if ( ! authserver)
     {
-      char* authserver = "http://172.22.0.3:5000/accounts/verifySensorToken";
-      char* bearertoken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6InRlc3QiLCJzdHJlYW1pZHMiOiJBTV9SRTcyMl8wMF9FSFosQU1fUjNCMkRfMDBfRUhaIiwicm9sZSI6ImJyZ3kiLCJpYXQiOjE2ODA3OTIwNTl9.WKwPChLjPbVl5zRKX9pdbDnzSF7ftbTwC7pw6rEflIk";
+      lprintf (0, "[%s] AUTH_ERR: Cannot authorize for write, AuthServer not configured", cinfo->hostname);
 
-      /* Check if AuthServer is configured */
-      if ( ! authserver)
-      {
-        lprintf (0, "[%s] AUTH_ERR: Cannot authorize for write, AuthServer not configured", cinfo->hostname);
-
-        snprintf (sendbuffer, sizeof (sendbuffer),
-            "[%s] AUTH_ERR: cannot authorize for write, AuthServer not configured", cinfo->hostname);
-        if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
-          return -1;
-      }
-      /* Check if BearerToken is configured */
-      else if (! bearertoken)
-      {
-        lprintf (0, "[%s] AUTH_ERR: Cannot authorize for write, BearerToken not configured", cinfo->hostname);
-
-        snprintf (sendbuffer, sizeof (sendbuffer),
-            "[%s] AUTH_ERR: cannot authorize for write, BearerToken not configured", cinfo->hostname);
-        if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
-          return -1;
-      }
-      /* Request token verification */
-      else
-      {
-        char *jwt_str = NULL;
-
-        /* Erase any recently stored token for this connection */
-        if (cinfo->jwttoken)
-          jwt_free( cinfo->jwttoken);
-
-        /* Read regex of size bytes from socket */
-        if (!(jwt_str = (char *)malloc (size + 1)))
-        {
-          lprintf (0, "[%s] Error allocating memory", cinfo->hostname);
-          return -1;
-        }
-
-        /* Read token from AUTHORIZATION command data */
-        if (RecvData (cinfo, jwt_str, size) < 0)
-        {
-          lprintf (0, "[%s] Error Recv'ing data", cinfo->hostname);
-          free(jwt_str);
-          return -1;
-        }
-
-        /* Make sure buffer is a terminated string */
-        jwt_str[size] = '\0';
-
-        // TODO: Check bearertoken size
-        //
-        struct MemoryStruct response;
-        response.memory = malloc(1); // Return a pointer to at least 1 block, will be resized dynamically
-        response.size = 0;
-
-        lprintf (1, "[%s] Requesting verification from %s", cinfo->hostname, authserver);
-        if (requestTokenVerification(authserver, bearertoken, jwt_str, &response))
-        {
-          lprintf (0, "[%s] Error requesting verification from %s", cinfo->hostname, authserver);
-          free(response.memory);
-          free(jwt_str);
-          return -1;
-        }
-
-        lprintf (1, "[%s] %s responded with: %s", cinfo->hostname, authserver, response.memory);
-
-        // Convert str response to object
-        json_error_t err;
-        json_t *json_object = json_loads(response.memory, 0, &err);
-
-        // Check if parsing was successful
-        if (json_object == NULL) {
-          lprintf(0, "[%s] JSON parsing error: on line %d: %s\n", err.line, err.text);
-          free(response.memory);
-          free(jwt_str);
-          return -1;
-        }
-
-        int response_code = json_integer_value(json_object_get(json_object, "status"));
-        lprintf(0, "response code = %d", response_code);
-
-        free(response.memory);
-        free(jwt_str);
+      snprintf (sendbuffer, sizeof (sendbuffer),
+          "[%s] AUTH_ERR: cannot authorize for write, AuthServer not configured", cinfo->hostname);
+      if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1)) {
+        return -1;
+      } else {
         return 0;
       }
     }
-  }
 
+    /* Check if BearerToken is configured */
+    if (! bearertoken)
+    {
+      lprintf (0, "[%s] AUTH_ERR: Cannot authorize for write, BearerToken not configured", cinfo->hostname);
+
+      snprintf (sendbuffer, sizeof (sendbuffer),
+          "[%s] AUTH_ERR: cannot authorize for write, BearerToken not configured", cinfo->hostname);
+      if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1)) {
+        return -1;
+      } else {
+        return 0;
+      }
+    }
+
+    /* Proceed to token verification */
+
+
+    /* Erase any recently stored token for this connection */
+    if (cinfo->jwttoken)
+      jwt_free( cinfo->jwttoken);
+
+    /* Read regex of size bytes from socket */
+    char *jwt_str = NULL;
+    if (!(jwt_str = (char *)malloc (size + 1)))
+    {
+      lprintf (0, "[%s] Error allocating memory", cinfo->hostname);
+      return -1;
+    }
+
+    /* Read token from AUTHORIZATION command data */
+    if (RecvData (cinfo, jwt_str, size) < 0)
+    {
+      lprintf (0, "[%s] Error Recv'ing data", cinfo->hostname);
+      free(jwt_str);
+      return -1;
+    }
+
+    /* Make sure buffer is a terminated string */
+    jwt_str[size] = '\0';
+
+    // TODO: Check bearertoken size
+
+    struct MemoryStruct response;
+    response.memory = malloc(1); // Return a pointer to at least 1 block, will be resized dynamically
+    response.size = 0;
+
+    lprintf (1, "[%s] Requesting verification from %s", cinfo->hostname, authserver);
+    if (requestTokenVerification(authserver, bearertoken, jwt_str, &response))
+    {
+      lprintf (0, "[%s] Error requesting verification from %s", cinfo->hostname, authserver);
+      free(response.memory);
+      free(jwt_str);
+      return -1;
+    }
+
+    lprintf (1, "[%s] %s responded with: %s", cinfo->hostname, authserver, response.memory);
+
+    // Convert str response to object
+    json_error_t err;
+    json_t *json_object = json_loads(response.memory, 0, &err);
+
+    // Check if parsing was successful
+    if (json_object == NULL) {
+      lprintf(0, "[%s] JSON parsing error: on line %d: %s\n", err.line, err.text);
+      free(response.memory);
+      free(jwt_str);
+      return -1;
+    }
+
+    int response_code = json_integer_value(json_object_get(json_object, "status"));
+    lprintf(0, "response code = %d", response_code);
+
+    free(response.memory);
+    free(jwt_str);
+  }
   /* BYE - End connection */
   else if (!strncasecmp (cinfo->recvbuf, "BYE", 3))
   {
