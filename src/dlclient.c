@@ -40,6 +40,7 @@
 
 #include <libmseed.h>
 #include <mxml.h>
+#include <jansson.h>
 
 #include "clients.h"
 #include "dlclient.h"
@@ -50,6 +51,7 @@
 #include "rbtree.h"
 #include "ring.h"
 #include "ringserver.h"
+#include "response_codes.h"
 
 /* Define the number of no-action loops that trigger the throttle */
 #define THROTTLE_TRIGGER 10
@@ -99,12 +101,6 @@ size_t WriteMemoryCallback(void *receivedContents, size_t size, size_t nmemb, vo
   userStorage->memory[userStorage->size] = '\0'; // add null terminator to be a valid C str
 
   return realsize; // return number of bytes written
-}
-
-// Function to handle the authentication response
-void handleAuthResponse(const char *response) {
-  // Handle the authentication response here
-  lprintf(1, "Response: %s\n", response);
 }
 
 /***********************************************************************
@@ -157,7 +153,7 @@ int requestTokenVerification(char *authserver, char *bearertoken, char *jwt_str,
     // Perform the POST request
     res = curl_easy_perform(curl);
     if (res != CURLE_OK) {
-      fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+      lprintf(0, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
     } else {
       ret = 0;
     }
@@ -699,7 +695,6 @@ HandleNegotiation (ClientInfo *cinfo)
       if (SendPacket (cinfo, "ERROR", "AUTHORIZATION requires a single argument", 0, 1, 1))
         return -1;
     }
-
     /* Check received token size */
     else if (size > DLMAXREGEXLEN)
     {
@@ -840,32 +835,35 @@ HandleNegotiation (ClientInfo *cinfo)
         }
       }
     }
-    else
+    else // request token verification
     {
       char* authserver = "http://172.22.0.3:5000/accounts/verifySensorToken";
       char* bearertoken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6InRlc3QiLCJzdHJlYW1pZHMiOiJBTV9SRTcyMl8wMF9FSFosQU1fUjNCMkRfMDBfRUhaIiwicm9sZSI6ImJyZ3kiLCJpYXQiOjE2ODA3OTIwNTl9.WKwPChLjPbVl5zRKX9pdbDnzSF7ftbTwC7pw6rEflIk";
 
       /* Check if AuthServer is configured */
-      if ( ! authserver) {
+      if ( ! authserver)
+      {
         lprintf (0, "[%s] AUTH_ERR: Cannot authorize for write, AuthServer not configured", cinfo->hostname);
 
         snprintf (sendbuffer, sizeof (sendbuffer),
             "[%s] AUTH_ERR: cannot authorize for write, AuthServer not configured", cinfo->hostname);
         if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
           return -1;
-
+      }
       /* Check if BearerToken is configured */
-      } else if (! bearertoken) {
+      else if (! bearertoken)
+      {
         lprintf (0, "[%s] AUTH_ERR: Cannot authorize for write, BearerToken not configured", cinfo->hostname);
 
         snprintf (sendbuffer, sizeof (sendbuffer),
             "[%s] AUTH_ERR: cannot authorize for write, BearerToken not configured", cinfo->hostname);
         if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
           return -1;
-
-      } else {
+      }
+      /* Request token verification */
+      else
+      {
         char *jwt_str = NULL;
-        int ret = -1; // for delaying return to allow for cleanup
 
         /* Erase any recently stored token for this connection */
         if (cinfo->jwttoken)
@@ -875,7 +873,7 @@ HandleNegotiation (ClientInfo *cinfo)
         if (!(jwt_str = (char *)malloc (size + 1)))
         {
           lprintf (0, "[%s] Error allocating memory", cinfo->hostname);
-          return ret;
+          return -1;
         }
 
         /* Read token from AUTHORIZATION command data */
@@ -883,31 +881,47 @@ HandleNegotiation (ClientInfo *cinfo)
         {
           lprintf (0, "[%s] Error Recv'ing data", cinfo->hostname);
           free(jwt_str);
-          return ret;
+          return -1;
         }
 
         /* Make sure buffer is a terminated string */
         jwt_str[size] = '\0';
 
         // TODO: Check bearertoken size
+        //
         struct MemoryStruct response;
         response.memory = malloc(1); // Return a pointer to at least 1 block, will be resized dynamically
         response.size = 0;
+
+        lprintf (1, "[%s] Requesting verification from %s", cinfo->hostname, authserver);
         if (requestTokenVerification(authserver, bearertoken, jwt_str, &response))
         {
           lprintf (0, "[%s] Error requesting verification from %s", cinfo->hostname, authserver);
+          free(response.memory);
+          free(jwt_str);
+          return -1;
         }
-        else
-        {
-          handleAuthResponse(response.memory);
-          ret = 0;
+
+        lprintf (1, "[%s] %s responded with: %s", cinfo->hostname, authserver, response.memory);
+
+        // Convert str response to object
+        json_error_t err;
+        json_t *json_object = json_loads(response.memory, 0, &err);
+
+        // Check if parsing was successful
+        if (json_object == NULL) {
+          lprintf(0, "[%s] JSON parsing error: on line %d: %s\n", err.line, err.text);
+          free(response.memory);
+          free(jwt_str);
+          return -1;
         }
+
+        int response_code = json_integer_value(json_object_get(json_object, "status"));
+        lprintf(0, "response code = %d", response_code);
 
         free(response.memory);
         free(jwt_str);
-
-        return ret;
-
+        return 0;
       }
     }
   }
