@@ -87,9 +87,15 @@ typedef struct ClientInfo_s {
   double      rxbyterate;   /* Track rate of data byte reception */
   hptime_t    ratetime;     /* Time stamp for TX and RX rate calculations */
   void       *extinfo;      /* Extended client info, protocol specific */
+  // TODO: delete these?
   jwt_t      *jwttoken;     /* JWT token for WRITE auth */
-  const char       *writepatternstr; /* WRITE match as string */
-  pcre       *writepattern; /* Auth write pattern from JWT token */
+  const char *writepatternstr; /* WRITE match as string */
+  pcre       *writepattern; /* Array of auth-to-write-streamId regexes from JWT token */
+  // end of TODO
+  int        tokenExpiry;   /* Token expiration in seconds since epoch */
+  pcre       **writepatterns; /* Array of auth-to-write-streamId regexes compiled from JWT token */
+  char       **writepatterns_str; /* Array of auth-to-write-streamId regexes compiled from JWT token */
+  int        writepattern_count; /* Number of elements in the writepatterns array */
 } ClientInfo;
 
 /* Structure used as the data for B-tree of stream tracking */

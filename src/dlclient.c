@@ -65,6 +65,7 @@ static int SendPacket (ClientInfo *cinfo, char *header, char *data,
 static int SendRingPacket (ClientInfo *cinfo);
 static int SelectedStreams (RingParams *ringparams, RingReader *reader);
 
+void break_here(int c){lprintf(0,"break!");}
 // helper functions and structs
 // Structure to hold the response received from the authentication server
 struct MemoryStruct {
@@ -114,7 +115,8 @@ size_t WriteMemoryCallback(void *receivedContents, size_t size, size_t nmemb, vo
  * JSON response is written in resp.memory as a string.
  ***********************************************************************/
 
-int requestTokenVerification(char *authserver, char *bearertoken, char *jwt_str, struct MemoryStruct *resp) {
+int requestTokenVerification(char *authserver, char *bearertoken,
+                             char *jwt_str, struct MemoryStruct *resp) {
   CURL *curl;
   CURLcode res;
   int ret = -1;
@@ -146,8 +148,13 @@ int requestTokenVerification(char *authserver, char *bearertoken, char *jwt_str,
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)resp);
 
     // Set the request payload
-    char jsonPayload[256];
-    snprintf(jsonPayload, sizeof(jsonPayload), "{\"token\": \"%s\"}", jwt_str);
+    size_t jsonPayloadSize = strlen(jwt_str) + 14; // 13 additional characters for the JSON structure
+                                                   // plus 1 for null termination
+    char *jsonPayload = malloc(jsonPayloadSize);
+    if (jsonPayload == NULL) {
+      lprintf(0, "Error allocating memory for JSON payload\n");
+    }
+    snprintf(jsonPayload, jsonPayloadSize, "{\"token\": \"%s\"}", jwt_str);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, jsonPayload);
 
     // Perform the POST request
@@ -160,6 +167,7 @@ int requestTokenVerification(char *authserver, char *bearertoken, char *jwt_str,
 
     // Clean up
     free(authHeader);
+    free(jsonPayload);
     curl_easy_cleanup(curl);
     curl_slist_free_all(headers);
   }
@@ -343,7 +351,7 @@ DLStreamPackets (ClientInfo *cinfo)
 static int
 HandleNegotiation (ClientInfo *cinfo)
 {
-  char sendbuffer[255];
+  char sendbuffer[300];
   int size;
   int fields;
   int selected;
@@ -845,7 +853,7 @@ HandleNegotiation (ClientInfo *cinfo)
     }
 
     char* authserver = "http://172.22.0.3:5000/accounts/verifySensorToken";
-    char* bearertoken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6InRlc3QiLCJzdHJlYW1pZHMiOiJBTV9SRTcyMl8wMF9FSFosQU1fUjNCMkRfMDBfRUhaIiwicm9sZSI6ImJyZ3kiLCJpYXQiOjE2ODA3OTIwNTl9.WKwPChLjPbVl5zRKX9pdbDnzSF7ftbTwC7pw6rEflIk";
+    char* bearertoken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImJyZ3kiLCJzdHJlYW1JZHMiOlsidGVzdF9zdHJlYW1faWRfNiIsInRlc3Rfc3RyZWFtX2lkXzIiLCJ0ZXN0X3N0cmVhbV9pZF8zIiwidGVzdF9zdHJlYW1faWRfMSJdLCJyb2xlIjoiYnJneSIsImlhdCI6MTY4NTAzNjcxNCwiZXhwIjoxNjg3NjI4NzE0fQ.wuquZUR4UE0TejEwDXYWj2gWvFCFhJENgUtuKpN2OO8";
 
     /* Check if AuthServer is configured */
     if ( ! authserver)
@@ -881,8 +889,10 @@ HandleNegotiation (ClientInfo *cinfo)
 
 
     /* Erase any recently stored token for this connection */
-    if (cinfo->jwttoken)
+    if (cinfo->jwttoken){
+      lprintf(0, "free jwttoken inside AUTHORIZATION");
       jwt_free( cinfo->jwttoken);
+    }
 
     /* Read regex of size bytes from socket */
     char *jwt_str = NULL;
@@ -909,47 +919,165 @@ HandleNegotiation (ClientInfo *cinfo)
     response.size = 0;
 
     lprintf (1, "[%s] Requesting verification from %s", cinfo->hostname, authserver);
-    if (requestTokenVerification(authserver, bearertoken, jwt_str, &response))
+    char *jwt_str2 = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImNpdGl6ZW4iLCJzdHJlYW1JZHMiOlsidGVzdF9zdHJlYW1faWRfMSIsInRlc3Rfc3RyZWFtX2lkXzIiLCJ0ZXN0X3N0cmVhbV9pZF8zIiwiVE9fQkVfTElOS0VEIl0sInJvbGUiOiJzZW5zb3IiLCJpYXQiOjE2ODUwMzY2MDMsImV4cCI6MTY4NzYyODYwM30.BL_BTtQ1FtXAPDYhdFvR7L1v3w5Cv8pe2jx67m0JkTk";
+    if (requestTokenVerification(authserver, bearertoken, jwt_str2, &response))
     {
       lprintf (0, "[%s] Error requesting verification from %s", cinfo->hostname, authserver);
       free(response.memory);
       free(jwt_str);
       return -1;
     }
+    free(jwt_str); // no more need for this
+    lprintf(0, "free jwt_str inside AUTHORIZATION");
 
-    lprintf (1, "[%s] %s responded with: %s", cinfo->hostname, authserver, response.memory);
+    lprintf (1, "[%s] %s responded with: %s\n", cinfo->hostname, authserver, response.memory);
 
     // Convert str response to object
     json_error_t err;
-    json_t *json_object = json_loads(response.memory, 0, &err);
+    json_t *jsonResponse = json_loads(response.memory, 0, &err);
+    free(response.memory); // no more need for this
+    lprintf(0, "free response.memory inside AUTHORIZATION");
 
     // Check if parsing was successful
-    if (json_object == NULL) {
+    if (jsonResponse == NULL) {
       lprintf(0, "[%s] JSON parsing error: on line %d: %s\n", err.line, err.text);
-      free(response.memory);
-      free(jwt_str);
       return -1;
     }
-
-    int response_code = json_integer_value(json_object_get(json_object, "status"));
-    lprintf(0, "response code = %d", response_code);
+    // TODO: Add handler for json decoding errors (ie: if(!json_is_object/string/array))
+    int response_code = json_integer_value(json_object_get(jsonResponse, "status"));
 
     int ret = 0;
     if (response_code == INBEHALF_VERIFICATION_SUCCESS)
     {
-      lprintf (1, "[%s] AUTH_OK: Granted authorization to WRITE on: %s", cinfo->hostname, cinfo->writepatternstr);
-      snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_OK: Granted authorization to WRITE on %s",
-          cinfo->writepatternstr);
-      // TODO: add to jwttoken and writepattern
+      // Get JSON components
+      json_t *decodedSenderToken = json_object_get(jsonResponse, "decodedSenderToken");
+      json_t *exp_ptr = json_object_get(decodedSenderToken, "exp");
+      json_t *streamIdsArray = json_object_get(decodedSenderToken, "streamIds");
+
+      // Check expected data types
+      if (exp_ptr == NULL || ( !json_is_integer(exp_ptr) )) {
+        // TODO: Handle this correctly, response with "ERROR" ?
+        // TODO: Refactor this code (maybe write this into a function) to avoid too much
+        // freeing because of early return
+        lprintf(0, "Error parsing expiration from token");
+        json_decref(streamIdsArray);
+        json_decref(decodedSenderToken);
+        json_decref(jsonResponse);
+        return -1;
+      }
+
+      if (streamIdsArray == NULL || ( !json_is_array(streamIdsArray) )) {
+        // TODO: Handle this correctly, response with "ERROR" ?
+        lprintf(0, "Error parsing streamIds from token");
+        json_decref(exp_ptr);
+        json_decref(decodedSenderToken);
+        json_decref(jsonResponse);
+        return -1;
+      }
+
+      // Assign to cinfo
+      cinfo->tokenExpiry = json_integer_value(exp_ptr);
+      lprintf(1, "[%s] Expiration: %d", cinfo->hostname, cinfo->tokenExpiry);
+      json_decref(exp_ptr); // no more need for this
+      lprintf(0, "decref exp_ptr");
+
+      // Iterate over the elements in the streamIds array
+      size_t index;
+      json_t *streamId;
+      const char *errptr;
+      int erroffset;
+
+      // Allocate size of arrays
+      cinfo->writepattern_count = 0;
+      size_t num_streams = json_array_size(streamIdsArray);
+      if (num_streams > DL_MAX_NUM_STREAMID){
+        lprintf(0, "Error number of streamIds (%zu) exceeded maximum: %d",
+            num_streams, DL_MAX_NUM_STREAMID);
+        json_decref(exp_ptr);
+        json_decref(decodedSenderToken);
+        json_decref(jsonResponse);
+        return -1;
+      }
+
+      lprintf(1, "[%s] Number of streamIds %zu", cinfo->hostname, num_streams);
+      cinfo->writepatterns_str = (char**)malloc(num_streams * sizeof(char*));
+      cinfo->writepatterns = (pcre**)malloc(num_streams * sizeof(pcre*));
+      if (cinfo->writepatterns == NULL || cinfo->writepatterns_str == NULL) {
+        // TODO: Properly handle the error if reallocation fails
+        lprintf (0, "[%s] Error allocating memory", cinfo->hostname);
+
+        //json_decref(streamIdsArray);
+        //json_decref(decodedSenderToken);
+        json_decref(jsonResponse);
+        return -1;
+      }
+
+      json_array_foreach(streamIdsArray, index, streamId) {
+        if (json_is_string(streamId))
+        {
+          // Compile pcre pattern from string
+          const char *streamIdStr = json_string_value(streamId);
+          lprintf(1, "[%s] StreamId: %s\n", cinfo->hostname, streamIdStr);
+          pcre *pattern = pcre_compile (streamIdStr, 0, &errptr, &erroffset, NULL);
+          if (errptr){
+            lprintf (0, "JWTToken: Error with pcre_compile: %s (offset: %d)", errptr, erroffset);
+
+            if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Internal error occured", 0, 1, 1))
+              ret = -1;
+
+            json_decref(streamIdsArray);
+            json_decref(decodedSenderToken);
+            json_decref(jsonResponse);
+            return ret;
+          }
+          cinfo->writepatterns[cinfo->writepattern_count] = pattern;
+
+          size_t pattern_str_size = (strlen(streamIdStr)+1) * sizeof(char);
+          if (pattern_str_size > DL_MAX_STREAMID_STR_LEN){
+            lprintf(0, "Length of streamId string (%d) exceeded maximum: %zu",
+                num_streams, DL_MAX_STREAMID_STR_LEN);
+            json_decref(exp_ptr);
+            json_decref(decodedSenderToken);
+            json_decref(jsonResponse);
+            return -1;
+          }
+          cinfo->writepatterns_str[cinfo->writepattern_count] = malloc(pattern_str_size);
+          strncpy(cinfo->writepatterns_str[cinfo->writepattern_count], streamIdStr, pattern_str_size);
+
+          cinfo->writepattern_count++;
+        }
+        else
+        {
+          lprintf(0, "Invalid streamId at index %zu\n", index);
+
+          json_decref(streamIdsArray);
+          json_decref(decodedSenderToken);
+          json_decref(jsonResponse);
+          return -1;
+        }
+      }
+      json_decref(streamIdsArray);
+
+      int i;
+      for (i = 0; i < cinfo->writepattern_count; i++) {
+        lprintf(0, "Pattern %d: %s\n", i, cinfo->writepatterns_str[i]);
+      }
+
+      lprintf (1, "[%s] AUTH_OK: Granted authorization to WRITE on streamIds", cinfo->hostname);
+      snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_OK: Granted authorization to WRITE on streamIds");
 
       if (SendPacket (cinfo, "OK", sendbuffer, 0, 1, 1))
         ret = -1;
+      break_here(0);
+      // Cleanup
+      json_decref(decodedSenderToken);
     }
     else if (response_code == INBEHALF_VERIFICATION_SUCCESS_NEW_TOKEN)
     {
-      lprintf (1, "[%s] AUTH_OK: Granted authorization to WRITE on: %s, added to list of devices", cinfo->hostname, cinfo->writepatternstr);
-      snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_OK: Granted authorization to WRITE on %s, added to list of devices",
-          cinfo->writepatternstr);
+      //const char *accessToken = json_string_value(json_object_get(decodedSenderToken, "accessToken"));
+      lprintf (1, "[%s] AUTH_OK: Granted authorization to WRITE on streamIds, added to list of devices", cinfo->hostname);
+      snprintf (sendbuffer, sizeof (sendbuffer),
+          "AUTH_OK: Granted authorization to WRITE on streamIds, added to list of devices");
       // TODO: add to jwttoken and writepattern
 
       if (SendPacket (cinfo, "OK", sendbuffer, 0, 1, 1))
@@ -985,8 +1113,8 @@ HandleNegotiation (ClientInfo *cinfo)
         ret = -1;
     }
 
-    free(response.memory);
-    free(jwt_str);
+    // Cleanup
+    json_decref(jsonResponse);
     return ret;
   }
 
@@ -1032,7 +1160,7 @@ static int
 HandleWrite (ClientInfo *cinfo)
 {
   StreamNode *stream;
-  char replystr[100];
+  char replystr[200];
   char streamid[100];
   char flags[100];
   int nread;

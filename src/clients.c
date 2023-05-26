@@ -237,6 +237,10 @@ ClientThread (void *arg)
     mytdp->td_flags = TDF_ACTIVE;
   pthread_mutex_unlock (&(mytdp->td_lock));
 
+  /* Initialize writepatterns array to empty */
+  cinfo->writepatterns = NULL;
+  cinfo->writepatterns_str = NULL;
+
   /* Main client loop, delegating processing and data flow */
   while (mytdp->td_flags != TDF_CLOSE)
   {
@@ -427,10 +431,32 @@ ClientThread (void *arg)
     pcre_free (cinfo->reader->reject);
   if (cinfo->reader->reject_extra)
     pcre_free (cinfo->reader->reject_extra);
-  if (cinfo->jwttoken)
+  if (cinfo->jwttoken){
     jwt_free (cinfo->jwttoken);
+    lprintf(0, "free jwttoken inside clients.c");
+  }
   if (cinfo->writepattern)
     pcre_free (cinfo->writepattern);
+
+  lprintf(0, "before new frees cinfo");
+  if (cinfo->writepatterns){
+    lprintf(0, "entered free writepaternS");
+    for(int i=0; i < cinfo->writepattern_count; i++){
+      pcre_free (cinfo->writepatterns[i]); // free each pattern in array
+    }
+    free(cinfo->writepatterns); // free pointer to arry
+    lprintf(0, "after free cinfo writepaternS");
+  }
+  if (cinfo->writepatterns_str){
+    lprintf(0, "entered free writepatern_STR");
+    for(int i=0; i < cinfo->writepattern_count; i++){
+      free (cinfo->writepatterns_str[i]); // free each string in array
+    }
+    free (cinfo->writepatterns_str); // free via pointer to array block
+    lprintf(0, "after free cinfo writepatern str");
+  }
+  lprintf(0, "after new frees cinfo");
+
 
   /* Release stream tracking binary tree */
   pthread_mutex_lock (&(cinfo->streams_lock));
@@ -439,6 +465,7 @@ ClientThread (void *arg)
   cinfo->streamscount = 0;
   pthread_mutex_unlock (&(cinfo->streams_lock));
 
+  lprintf(0, "after mutex unlock before free cinfosendbuf");
   /* Release the client send, receive and packet buffers */
   if (cinfo->sendbuf)
     free (cinfo->sendbuf);
@@ -448,8 +475,11 @@ ClientThread (void *arg)
     free (cinfo->packetdata);
 
   /* Release client socket structure */
-  if (cinfo->addr)
+  if (cinfo->addr){
+  lprintf(0, "before free cinfoaddr");
     free (cinfo->addr);
+  lprintf(0, "after free cinfo addr");
+  }
 
   /* Shutdown and release miniSEED write data stream */
   if (cinfo->mswrite)
