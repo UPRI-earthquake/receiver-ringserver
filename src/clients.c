@@ -237,7 +237,8 @@ ClientThread (void *arg)
     mytdp->td_flags = TDF_ACTIVE;
   pthread_mutex_unlock (&(mytdp->td_lock));
 
-  /* Initialize writepatterns array to empty */
+  /* Initialize AUTHORIZATION variables to false and empty */
+  cinfo->authorized = 0;
   cinfo->writepatterns = NULL;
   cinfo->writepatterns_str = NULL;
 
@@ -437,6 +438,10 @@ ClientThread (void *arg)
   if (cinfo->writepattern)
     pcre_free (cinfo->writepattern);
 
+  /* Release AUHORIZATION variables */
+  if (cinfo->authorized){
+    cinfo->authorized = 0;
+  }
   if (cinfo->writepatterns){
     for(int i=0; i < cinfo->writepattern_count; i++){
       pcre_free (cinfo->writepatterns[i]); // free each pattern in array

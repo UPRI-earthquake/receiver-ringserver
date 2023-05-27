@@ -58,7 +58,7 @@ typedef struct ClientInfo_s {
     uint8_t four[4];
   } wsmask;                 /* Masking key for WebSocket message */
   size_t      wsmaskidx;    /* Index for unmasking WebSocket message */
-  uint8_t     writeperm;    /* Write permission flag */
+  uint8_t     writeperm;    /* Flag for whether IP is listed on WriteIP config*/
   uint8_t     trusted;      /* Trusted client flag */
   float       timewinlimit; /* Time window ring search limit in percent */
   RingParams *ringparams;   /* Ring buffer parameters */
@@ -92,6 +92,7 @@ typedef struct ClientInfo_s {
   const char *writepatternstr; /* WRITE match as string */
   pcre       *writepattern; /* Array of auth-to-write-streamId regexes from JWT token */
   // end of TODO
+  uint8_t    authorized;    /* Flag for authority to write, ie passed AUTHORIZATION command*/
   int        tokenExpiry;   /* Token expiration in seconds since epoch */
   pcre       **writepatterns; /* Array of auth-to-write-streamId regexes compiled from JWT token */
   char       **writepatterns_str; /* Array of auth-to-write-streamId regexes compiled from JWT token */

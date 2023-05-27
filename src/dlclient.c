@@ -1056,8 +1056,11 @@ HandleNegotiation (ClientInfo *cinfo)
       int i;
       lprintf(1, "[%s] Stream IDs:", cinfo->hostname);
       for (i = 0; i < cinfo->writepattern_count; i++) {
-        lprintf(1, "[%s]  %s", cinfo->hostname, cinfo->writepatterns_str[i]);
+        lprintf(1, "[%s]    %s", cinfo->hostname, cinfo->writepatterns_str[i]);
       }
+
+      // Update write authority flag
+      cinfo->authorized = 1;
 
       lprintf (1, "[%s] AUTH_OK: Granted authorization to WRITE on streamIds", cinfo->hostname);
       snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_OK: Granted authorization to WRITE on streamIds");
