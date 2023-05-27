@@ -65,7 +65,6 @@ static int SendPacket (ClientInfo *cinfo, char *header, char *data,
 static int SendRingPacket (ClientInfo *cinfo);
 static int SelectedStreams (RingParams *ringparams, RingReader *reader);
 
-void break_here(int c){lprintf(0,"break!");}
 // helper functions and structs
 // Structure to hold the response received from the authentication server
 struct MemoryStruct {
@@ -890,7 +889,6 @@ HandleNegotiation (ClientInfo *cinfo)
 
     /* Erase any recently stored token for this connection */
     if (cinfo->jwttoken){
-      lprintf(0, "free jwttoken inside AUTHORIZATION");
       jwt_free( cinfo->jwttoken);
     }
 
@@ -928,7 +926,6 @@ HandleNegotiation (ClientInfo *cinfo)
       return -1;
     }
     free(jwt_str); // no more need for this
-    lprintf(0, "free jwt_str inside AUTHORIZATION");
 
     lprintf (1, "[%s] %s responded with: %s\n", cinfo->hostname, authserver, response.memory);
 
@@ -936,14 +933,13 @@ HandleNegotiation (ClientInfo *cinfo)
     json_error_t err;
     json_t *jsonResponse = json_loads(response.memory, 0, &err);
     free(response.memory); // no more need for this
-    lprintf(0, "free response.memory inside AUTHORIZATION");
 
     // Check if parsing was successful
     if (jsonResponse == NULL) {
       lprintf(0, "[%s] JSON parsing error: on line %d: %s\n", err.line, err.text);
       return -1;
     }
-    // TODO: Add handler for json decoding errors (ie: if(!json_is_object/string/array))
+
     int response_code = json_integer_value(json_object_get(jsonResponse, "status"));
 
     int ret = 0;
@@ -977,9 +973,8 @@ HandleNegotiation (ClientInfo *cinfo)
 
       // Assign to cinfo
       cinfo->tokenExpiry = json_integer_value(exp_ptr);
-      lprintf(1, "[%s] Expiration: %d", cinfo->hostname, cinfo->tokenExpiry);
+      lprintf(1, "[%s] Token expiration: %d", cinfo->hostname, cinfo->tokenExpiry);
       json_decref(exp_ptr); // no more need for this
-      lprintf(0, "decref exp_ptr");
 
       // Iterate over the elements in the streamIds array
       size_t index;
@@ -1006,8 +1001,8 @@ HandleNegotiation (ClientInfo *cinfo)
         // TODO: Properly handle the error if reallocation fails
         lprintf (0, "[%s] Error allocating memory", cinfo->hostname);
 
-        //json_decref(streamIdsArray);
-        //json_decref(decodedSenderToken);
+        json_decref(streamIdsArray);
+        json_decref(decodedSenderToken);
         json_decref(jsonResponse);
         return -1;
       }
@@ -1017,7 +1012,6 @@ HandleNegotiation (ClientInfo *cinfo)
         {
           // Compile pcre pattern from string
           const char *streamIdStr = json_string_value(streamId);
-          lprintf(1, "[%s] StreamId: %s\n", cinfo->hostname, streamIdStr);
           pcre *pattern = pcre_compile (streamIdStr, 0, &errptr, &erroffset, NULL);
           if (errptr){
             lprintf (0, "JWTToken: Error with pcre_compile: %s (offset: %d)", errptr, erroffset);
@@ -1058,9 +1052,11 @@ HandleNegotiation (ClientInfo *cinfo)
       }
       json_decref(streamIdsArray);
 
+      // Print stream IDs
       int i;
+      lprintf(1, "[%s] Stream IDs:", cinfo->hostname);
       for (i = 0; i < cinfo->writepattern_count; i++) {
-        lprintf(0, "Pattern %d: %s\n", i, cinfo->writepatterns_str[i]);
+        lprintf(1, "[%s]  %s", cinfo->hostname, cinfo->writepatterns_str[i]);
       }
 
       lprintf (1, "[%s] AUTH_OK: Granted authorization to WRITE on streamIds", cinfo->hostname);
@@ -1068,7 +1064,7 @@ HandleNegotiation (ClientInfo *cinfo)
 
       if (SendPacket (cinfo, "OK", sendbuffer, 0, 1, 1))
         ret = -1;
-      break_here(0);
+
       // Cleanup
       json_decref(decodedSenderToken);
     }
