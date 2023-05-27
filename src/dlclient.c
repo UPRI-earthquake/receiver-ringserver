@@ -917,7 +917,8 @@ HandleNegotiation (ClientInfo *cinfo)
     response.size = 0;
 
     lprintf (1, "[%s] Requesting verification from %s", cinfo->hostname, authserver);
-    char *jwt_str2 = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImNpdGl6ZW4iLCJzdHJlYW1JZHMiOlsidGVzdF9zdHJlYW1faWRfMSIsInRlc3Rfc3RyZWFtX2lkXzIiLCJ0ZXN0X3N0cmVhbV9pZF8zIiwiVE9fQkVfTElOS0VEIl0sInJvbGUiOiJzZW5zb3IiLCJpYXQiOjE2ODUwMzY2MDMsImV4cCI6MTY4NzYyODYwM30.BL_BTtQ1FtXAPDYhdFvR7L1v3w5Cv8pe2jx67m0JkTk";
+    char *jwt_str2 = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImNpdGl6ZW4iLCJzdHJlYW1JZHMiOlsiR0VfVE9MSTJfLiovTVNFRUQiLCJ0ZXN0X3N0cmVhbV9pZF8yIiwidGVzdF9zdHJlYW1faWRfMyIsIlRPX0JFX0xJTktFRCJdLCJyb2xlIjoic2Vuc29yIiwiaWF0IjoxNjg1MjAzODY5LCJleHAiOjE2ODc3OTU4Njl9.7hyBhnQP3rCjdJCQaRyeTOJz9_9WGMZzZeQbjPhu_wQ";
+    lprintf(1, "JWTSTR: %s",jwt_str2);
     if (requestTokenVerification(authserver, bearertoken, jwt_str2, &response))
     {
       lprintf (0, "[%s] Error requesting verification from %s", cinfo->hostname, authserver);
@@ -1170,6 +1171,7 @@ HandleWrite (ClientInfo *cinfo)
   char *type;
   pcre_extra *match_extra = NULL;
   int pcre_result = 0;
+  uint8_t found_match = 0;
 
   if (!cinfo)
     return -1;
@@ -1187,40 +1189,64 @@ HandleWrite (ClientInfo *cinfo)
     return -1;
   }
 
-  if (cinfo->jwttoken && cinfo->writepattern) {
-      /* Check if token is expired */
-      time_t currTime = time(NULL);
-      if (currTime >  jwt_get_grant_int(cinfo->jwttoken, "exp")) {
-        // jwt_get_grant_int returns 0 is not exist, so no exp => fail
-        lprintf (1, "[%s] WRITE_ERR: Token expired: %d > %d",
-                 cinfo->hostname, currTime, jwt_get_grant_int(cinfo->jwttoken, "exp"));
+  /* Check authority to WRITE */
+  if (cinfo->authorized && cinfo->writepatterns)
+  {
+    /* Check if token is expired */
+    time_t currTime = time(NULL);
+    if (currTime > cinfo->tokenExpiry) {
+      lprintf (1, "[%s] WRITE_ERR: Token expired: %d > %d",
+               cinfo->hostname, currTime, cinfo->tokenExpiry);
 
-        snprintf (replystr, sizeof (replystr), "WRITE_ERR: Token expired");
+      snprintf (replystr, sizeof (replystr), "WRITE_ERR: Token expired");
+      SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
+      return -1;
+    }
+
+    /* Check if streamid of packet to be written is in array of allowed client's writepatterns*/
+    found_match = 0;
+    for(int i = 0; i < cinfo->writepattern_count; i++){ // TODO: Optimize this? (see DL_MAX_NUM_STREAMID)
+      pcre_result = pcre_exec (cinfo->writepatterns[i], match_extra, streamid, strlen (streamid), 0, 0, NULL, 0);
+      if (match_extra) {
+        pcre_free(match_extra);  // deallocate the memory
+        match_extra = NULL;      // make pointer point to nothing for next iteration
+      }
+
+      if(pcre_result<0){ // PCRE_ERROR_NOMATCH=-1
+        continue;
+      }else{
+        found_match = 1;
+        break;
+      }
+    }
+
+    if(found_match)
+    {
+        lprintf (3, "[%s]: Token authorized to WRITE on streamid: %s, pcre_result: %d",
+                 cinfo->hostname, streamid, pcre_result);
+    }
+    else
+    {
+        lprintf (1, "[%s] WRITE_ERR: Token not authorized to WRITE streamid: %s, pcre_result: %d",
+                 cinfo->hostname, streamid, pcre_result);
+
+        snprintf (replystr, sizeof (replystr), "WRITE_ERR: Token not authorized to WRITE on %s", streamid);
         SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
+
         return -1;
-      }
-
-      /* Check if streamid in token matches streamid of packet to be written */
-      pcre_result = pcre_exec (cinfo->writepattern, match_extra, streamid, strlen (streamid), 0, 0, NULL, 0);
-      if(pcre_result<0) {
-          // PCRE_ERROR_NOMATCH=-1
-          lprintf (1, "[%s] WRITE_ERR: Token not authorized to WRITE streamid: %s, pcre_result: %d",
-                   cinfo->hostname, streamid, pcre_result);
-
-          snprintf (replystr, sizeof (replystr), "WRITE_ERR: Token not authorized to WRITE on %s", streamid);
-          SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
-          if (match_extra) {
-            pcre_free(match_extra);
-          }
-          return -1;
-      } else {
-          lprintf (3, "[%s]: Token authorized to WRITE on streamid: %s, pcre_result: %d",
-                   cinfo->hostname, streamid, pcre_result);
-          if (match_extra) {
-             pcre_free(match_extra);
-          }
-      }
+    }
   }
+  else
+  {
+    lprintf (1, "[%s] WRITE_ERR: No AUTHORIZATION to WRITE",
+             cinfo->hostname, streamid, pcre_result);
+
+    snprintf (replystr, sizeof (replystr), "WRITE_ERR: No AUTHORIZATION to WRITE");
+    SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
+
+    return -1;
+  }
+
 
 
   /* Copy the stream ID */

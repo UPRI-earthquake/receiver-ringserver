@@ -239,6 +239,7 @@ ClientThread (void *arg)
 
   /* Initialize AUTHORIZATION variables to false and empty */
   cinfo->authorized = 0;
+  cinfo->tokenExpiry = 0;
   cinfo->writepatterns = NULL;
   cinfo->writepatterns_str = NULL;
 
@@ -441,6 +442,7 @@ ClientThread (void *arg)
   /* Release AUHORIZATION variables */
   if (cinfo->authorized){
     cinfo->authorized = 0;
+    cinfo->tokenExpiry = 0;
   }
   if (cinfo->writepatterns){
     for(int i=0; i < cinfo->writepattern_count; i++){
