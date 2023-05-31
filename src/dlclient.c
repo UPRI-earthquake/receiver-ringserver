@@ -769,7 +769,6 @@ HandleNegotiation (ClientInfo *cinfo)
       return -1;
     }
 
-
     // Get file attributes into filestat (NOTE: not used...)
     if (stat (keyfilename, &filestat))
       return -1;
@@ -805,7 +804,6 @@ HandleNegotiation (ClientInfo *cinfo)
       lprintf(0, "[%s] Error reading bearertoken from authdir/secret.key", cinfo->hostname);
       return -1;
     }
-    lprintf(0, "Read bearertoken: %s\n", bearertoken);
     fclose(fp);
 
     // Terminate properly
@@ -818,20 +816,22 @@ HandleNegotiation (ClientInfo *cinfo)
     /* Proceed to token verification */
 
 
-    /* Erase any recently stored token for this connection */
-    if (cinfo->jwttoken){
+    /* Get client token from dali AUTHORIZATION command */
+    char *jwt_str = NULL;
+    struct MemoryStruct response;
+
+    if (cinfo->jwttoken){ // Erase any recently stored token for this connection
       jwt_free( cinfo->jwttoken);
     }
 
-    /* Read regex of size bytes from socket */
-    char *jwt_str = NULL;
+    // Allocate memory for jwt holder
     if (!(jwt_str = (char *)malloc (size + 1)))
     {
       lprintf (0, "[%s] Error allocating memory", cinfo->hostname);
       return -1;
     }
 
-    /* Read token from AUTHORIZATION command data */
+    // Read token from AUTHORIZATION command data
     if (RecvData (cinfo, jwt_str, size) < 0)
     {
       lprintf (0, "[%s] Error Recv'ing data", cinfo->hostname);
@@ -839,18 +839,15 @@ HandleNegotiation (ClientInfo *cinfo)
       return -1;
     }
 
-    /* Make sure buffer is a terminated string */
+    // Make sure buffer is a terminated string
     jwt_str[size] = '\0';
 
-
-    struct MemoryStruct response;
+    // Ask AuthServer to verify token
     response.memory = malloc(1); // Return a pointer to at least 1 block, will be resized dynamically
     response.size = 0;
 
     lprintf (1, "[%s] Requesting verification from %s", cinfo->hostname, authserver);
-    char *jwt_str2 = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImNpdGl6ZW4iLCJzdHJlYW1JZHMiOlsiR0VfVE9MSTJfLiovTVNFRUQiLCJ0ZXN0X3N0cmVhbV9pZF8yIiwidGVzdF9zdHJlYW1faWRfMyIsIlRPX0JFX0xJTktFRCJdLCJyb2xlIjoic2Vuc29yIiwiaWF0IjoxNjg1MjAzODY5LCJleHAiOjE2ODc3OTU4Njl9.7hyBhnQP3rCjdJCQaRyeTOJz9_9WGMZzZeQbjPhu_wQ";
-    lprintf(1, "JWTSTR: %s",jwt_str2);
-    if (requestTokenVerification(authserver, bearertoken, jwt_str2, &response))
+    if (requestTokenVerification(authserver, bearertoken, jwt_str, &response))
     {
       lprintf (0, "[%s] Error requesting verification from %s", cinfo->hostname, authserver);
       free(response.memory);
