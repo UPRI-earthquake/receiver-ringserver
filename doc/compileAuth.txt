@@ -43,17 +43,11 @@ sudo apt-get install libjwt-dev libjansson-dev
 
 
 # to test:
-sudo apt-get install python3 python3-websockets python3-dateutil python3-defusedxml
-git clone https://github.com/crotwell/scsn-utils.git
 edit ringserver conf file add
 AuthDir your/auth/directory
 which should contain your secret as
-secret.key
+secret.key, paste your brgy token here (from AuthServer)
 
-# generate a token with
-/usr/bin/python3 scsn-utils/python/createToken.py -p '<regex match pattern>' -s your/auth/directory/secret.key -u dragrace -o dutytoken.jwt --ed 70
-
-/usr/bin/python3 scsn-utils/python/createToken.py -p 'XX.*/MSEED' -s your/auth/directory/secret.key -u dragrace -o dutytoken.jwt --ed 70
-# also use
---verify <url>
-to verify token with websocket connetion to ringserver
+#use slink2dali with auth option:
+TOKEN=paste_citizen_token
+./slink2dali -vvv -a $TOKEN -S GE_TOLI2 geofon.gfz-potsdam.de:18000 localhost:18000

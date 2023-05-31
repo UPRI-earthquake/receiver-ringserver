@@ -756,7 +756,6 @@ HandleNegotiation (ClientInfo *cinfo)
     char *keyfilename = NULL;
     struct stat filestat;
     FILE *fp;
-    unsigned char bearertoken[16384];
     int key_len = 0;
 
     // read key to verify
@@ -766,24 +765,52 @@ HandleNegotiation (ClientInfo *cinfo)
     keyfilename = realpath (keypath, NULL);
     if (keyfilename == NULL)
     {
-      lprintf (0, "Error resolving path to key file: %s", keypath);
+      lprintf (0, "[%s] Error resolving path to token file: %s", cinfo->hostname, keypath);
       return -1;
     }
 
 
+    // Get file attributes into filestat (NOTE: not used...)
     if (stat (keyfilename, &filestat))
       return -1;
+
+    // Open file
     if ((fp = fopen (keyfilename, "r")) == NULL)
     {
-      lprintf (0, "Error opening key file %s:  %s",
-               keyfilename, strerror (errno));
+      lprintf (0, "[%s] Error opening token file %s:  %s",
+               cinfo->hostname, keyfilename, strerror (errno));
       return -1;
     }
-    key_len = fread(bearertoken, 1, sizeof(bearertoken), fp);
-    lprintf (0, "Read key_len:: %d", key_len);
+
+    // Obtain the size of the file
+    fseek(fp, 0, SEEK_END);         // change cursor to 0 offset from end
+    long file_size = ftell(fp);     // get current position of file pointer
+    fseek(fp, 0, SEEK_SET);         // putback cursor to 0 offset from start
+    if (file_size > DLMAXREGEXLEN){
+      lprintf (0, "[%s] Token in authdir/secret.key is too large: %d",
+               cinfo->hostname, file_size);
+      return -1;
+    }
+
+    // Allocate memory
+    char *bearertoken = malloc(file_size + 1);
+    if (bearertoken == NULL) {
+      lprintf(0, "[%s] Failed to allocate memory for bearertoken", cinfo->hostname);
+      return -1;
+    }
+
+    // Read token from authdir/secret.key into bearertoken
+    key_len = fread(bearertoken, 1, file_size, fp);
+    if (key_len != file_size) {
+      lprintf(0, "[%s] Error reading bearertoken from authdir/secret.key", cinfo->hostname);
+      return -1;
+    }
+    lprintf(0, "Read bearertoken: %s\n", bearertoken);
     fclose(fp);
+
+    // Terminate properly
     bearertoken[key_len] = '\0';
-    if (bearertoken[key_len-1] == '\n') {
+    if ((key_len > 0) && (bearertoken[key_len-1] == '\n')) {
       bearertoken[key_len-1] = '\0'; //zap newline
     }
 
@@ -831,6 +858,7 @@ HandleNegotiation (ClientInfo *cinfo)
       return -1;
     }
     free(jwt_str); // no more need for this
+    free(bearertoken); // no more need for this
 
     lprintf (1, "[%s] %s responded with: %s\n", cinfo->hostname, authserver, response.memory);
 
