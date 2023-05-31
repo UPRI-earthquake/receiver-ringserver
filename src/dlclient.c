@@ -720,137 +720,6 @@ HandleNegotiation (ClientInfo *cinfo)
       }
     }
 
-    if (0) // disable for now
-    {
-      if ( ! authdir) {
-        lprintf (0, "[%s] AUTH_ERR: Cannot authorize for write, auth not configured", cinfo->hostname);
-
-        snprintf (sendbuffer, sizeof (sendbuffer),
-            "[%s] AUTH_ERR: cannot authorize for write, auth not configured", cinfo->hostname);
-        if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
-          return -1;
-
-        OKGO = 0;
-      } else {
-        char *keypath = NULL;
-        char *keyfilename = NULL;
-        struct stat filestat;
-        FILE *fp;
-        unsigned char key[16384];
-        int key_len = 0;
-
-        char *jwt_str = NULL;
-        jwt_t *jwt = NULL;
-
-        int ret;
-
-        if (cinfo->jwttoken)
-          jwt_free( cinfo->jwttoken);
-
-        /* Read regex of size bytes from socket */
-        if (!(jwt_str = (char *)malloc (size + 1)))
-        {
-          lprintf (0, "[%s] Error allocating memory", cinfo->hostname);
-          return -1;
-        }
-
-        if (RecvData (cinfo, jwt_str, size) < 0)
-        {
-          lprintf (0, "[%s] Error Recv'ing data", cinfo->hostname);
-          return -1;
-        }
-
-        /* Make sure buffer is a terminated string */
-        jwt_str[size] = '\0';
-
-        /* read key to verify */
-        if (asprintf (&keypath, "%s/%s", authdir, "secret.key") < 0)
-          return -1;
-
-        keyfilename = realpath (keypath, NULL);
-        if (keyfilename == NULL)
-        {
-          lprintf (0, "Error resolving path to key file: %s", keypath);
-          return -1;
-        }
-
-
-        if (stat (keyfilename, &filestat))
-          return -1;
-        if ((fp = fopen (keyfilename, "r")) == NULL)
-        {
-          lprintf (0, "Error opening key file %s:  %s",
-                   keyfilename, strerror (errno));
-          return -1;
-        }
-        key_len = fread(key, 1, sizeof(key), fp);
-      	fclose(fp);
-        key[key_len] = '\0';
-      	if (key[key_len-1] == '\n') {
-      		//zap newline
-      		key[key_len-1] = '\0';
-      	}
-
-        ret = jwt_new(&jwt);
-        if (ret != 0) {
-          lprintf (0, "Error alloc memory for jwt %d", ret);
-          return -1;
-        }
-
-        // decode with verify secret
-        ret = jwt_decode(&jwt, jwt_str, key, key_len);
-
-        if (ret != 0) {
-            lprintf (0, "[%s] AUTH_ERR: Token failed verification %d %s", cinfo->hostname, ret, strerror (ret));
-            //lprintf (0, "%s", jwt_str);
-            //lprintf (0, "%s", key);
-
-            if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Token failed verification", 0, 1, 1))
-              return -1;
-
-            OKGO = 0;
-            return -1; // kill on auth error?
-        }
-
-        // check expire time
-        time_t currTime = time(NULL);
-        if (currTime >  jwt_get_grant_int(jwt, "exp")) {
-          // jwt_get_grant_int returns 0 is not exist, so no exp => fail
-          lprintf (1, "[%s] AUTH_ERR: Token expired: %d > %d",
-                   cinfo->hostname, currTime, jwt_get_grant_int(jwt, "exp"));
-
-          SendPacket (cinfo, "ERROR", "AUTH_ERR: Token expired", 0, 1, 1);
-          return -1;
-        }
-
-        cinfo->jwttoken = jwt;
-        // no longer need the base64 string
-        free(jwt_str);
-        /* Compile write expression */
-        cinfo->writepatternstr = jwt_get_grant(cinfo->jwttoken, "wpat");
-
-        const char *errptr;
-        int erroffset;
-        cinfo->writepattern = pcre_compile (cinfo->writepatternstr, 0, &errptr, &erroffset, NULL);
-        if (errptr)
-        {
-          lprintf (0, "[%s] AUTH_ERR: Error with pcre_compile: %s (offset: %d)", cinfo->hostname, errptr, erroffset);
-
-          if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Error with jwt write expression", 0, 1, 1))
-            return -1;
-        }
-        else
-        {
-          lprintf (0, "[%s] AUTH_OK: Granted authorization to WRITE on: %s", cinfo->hostname, cinfo->writepatternstr);
-
-          snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_OK: Granted authorization to WRITE on %s",
-              cinfo->writepatternstr);
-         if (SendPacket (cinfo, "OK", sendbuffer, 0, 1, 1))
-            return -1;
-        }
-      }
-    }
-
     char* authserver = "http://172.22.0.3:5000/accounts/verifySensorToken";
     //char* bearertoken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImJyZ3kiLCJzdHJlYW1JZHMiOlsidGVzdF9zdHJlYW1faWRfNiIsInRlc3Rfc3RyZWFtX2lkXzIiLCJ0ZXN0X3N0cmVhbV9pZF8zIiwidGVzdF9zdHJlYW1faWRfMSJdLCJyb2xlIjoiYnJneSIsImlhdCI6MTY4NTAzNjcxNCwiZXhwIjoxNjg3NjI4NzE0fQ.wuquZUR4UE0TejEwDXYWj2gWvFCFhJENgUtuKpN2OO8";
 
@@ -911,7 +780,7 @@ HandleNegotiation (ClientInfo *cinfo)
       return -1;
     }
     key_len = fread(bearertoken, 1, sizeof(bearertoken), fp);
-    lprintf (0, "Read key_len: %d", key_len);
+    lprintf (0, "Read key_len:: %d", key_len);
     fclose(fp);
     bearertoken[key_len] = '\0';
     if (bearertoken[key_len-1] == '\n') {
