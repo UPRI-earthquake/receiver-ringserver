@@ -720,9 +720,6 @@ HandleNegotiation (ClientInfo *cinfo)
       }
     }
 
-    char* authserver = "http://172.22.0.3:5000/accounts/verifySensorToken";
-    //char* bearertoken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImJyZ3kiLCJzdHJlYW1JZHMiOlsidGVzdF9zdHJlYW1faWRfNiIsInRlc3Rfc3RyZWFtX2lkXzIiLCJ0ZXN0X3N0cmVhbV9pZF8zIiwidGVzdF9zdHJlYW1faWRfMSJdLCJyb2xlIjoiYnJneSIsImlhdCI6MTY4NTAzNjcxNCwiZXhwIjoxNjg3NjI4NzE0fQ.wuquZUR4UE0TejEwDXYWj2gWvFCFhJENgUtuKpN2OO8";
-
     /* Check if AuthServer is configured */
     if ( ! authserver)
     {

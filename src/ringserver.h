@@ -75,6 +75,7 @@ extern struct cthread *cthreads;
 extern char *serverid;
 extern char *webroot;
 extern char *authdir;
+extern char *authserver;
 extern hptime_t serverstarttime;
 extern int clientcount;
 extern int resolvehosts;

@@ -79,6 +79,7 @@ struct cthread *cthreads = NULL; /* Client threads list */
 char *serverid = NULL;    /* Server ID */
 char *webroot = NULL;     /* Web content root directory */
 char *authdir = NULL;     /* JWT auth content root directory */
+char *authserver = NULL;  /* IP-or-hostname:PORT of the auth server*/
 hptime_t serverstarttime; /* Server start time */
 int clientcount = 0;      /* Track number of connected clients */
 int resolvehosts = 1;     /* Flag to control resolving of client hostnames */
@@ -2075,6 +2076,17 @@ ReadConfigFile (char *configfile, int dynamiconly, time_t mtime)
         lprintf (0, "Error with AuthDir value: %s", value);
         return -1;
       }
+    }
+    else if (!dynamiconly && !strncasecmp ("AuthServer", ptr, 10))
+    {
+      if (sscanf (ptr, "%*s %512s", svalue) != 1)
+      {
+        lprintf (0, "Error with AuthServer config file line: %s", ptr);
+        return -1;
+      }
+      svalue[sizeof (svalue) - 1] = '\0';
+
+      authserver = strdup (svalue);
     }
   } /* Done reading config file lines */
 
