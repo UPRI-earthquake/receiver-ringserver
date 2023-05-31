@@ -852,7 +852,7 @@ HandleNegotiation (ClientInfo *cinfo)
     }
 
     char* authserver = "http://172.22.0.3:5000/accounts/verifySensorToken";
-    char* bearertoken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImJyZ3kiLCJzdHJlYW1JZHMiOlsidGVzdF9zdHJlYW1faWRfNiIsInRlc3Rfc3RyZWFtX2lkXzIiLCJ0ZXN0X3N0cmVhbV9pZF8zIiwidGVzdF9zdHJlYW1faWRfMSJdLCJyb2xlIjoiYnJneSIsImlhdCI6MTY4NTAzNjcxNCwiZXhwIjoxNjg3NjI4NzE0fQ.wuquZUR4UE0TejEwDXYWj2gWvFCFhJENgUtuKpN2OO8";
+    //char* bearertoken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImJyZ3kiLCJzdHJlYW1JZHMiOlsidGVzdF9zdHJlYW1faWRfNiIsInRlc3Rfc3RyZWFtX2lkXzIiLCJ0ZXN0X3N0cmVhbV9pZF8zIiwidGVzdF9zdHJlYW1faWRfMSJdLCJyb2xlIjoiYnJneSIsImlhdCI6MTY4NTAzNjcxNCwiZXhwIjoxNjg3NjI4NzE0fQ.wuquZUR4UE0TejEwDXYWj2gWvFCFhJENgUtuKpN2OO8";
 
     /* Check if AuthServer is configured */
     if ( ! authserver)
@@ -869,7 +869,7 @@ HandleNegotiation (ClientInfo *cinfo)
     }
 
     /* Check if BearerToken is configured */
-    if (! bearertoken)
+    if (! authdir)
     {
       lprintf (0, "[%s] AUTH_ERR: Cannot authorize for write, BearerToken not configured", cinfo->hostname);
 
@@ -882,7 +882,42 @@ HandleNegotiation (ClientInfo *cinfo)
       }
     }
 
-    // TODO: Check bearertoken size
+    /* Get bearertoken from authdir/secret.key */
+    char *keypath = NULL;
+    char *keyfilename = NULL;
+    struct stat filestat;
+    FILE *fp;
+    unsigned char bearertoken[16384];
+    int key_len = 0;
+
+    // read key to verify
+    if (asprintf (&keypath, "%s/%s", authdir, "secret.key") < 0)
+      return -1;
+
+    keyfilename = realpath (keypath, NULL);
+    if (keyfilename == NULL)
+    {
+      lprintf (0, "Error resolving path to key file: %s", keypath);
+      return -1;
+    }
+
+
+    if (stat (keyfilename, &filestat))
+      return -1;
+    if ((fp = fopen (keyfilename, "r")) == NULL)
+    {
+      lprintf (0, "Error opening key file %s:  %s",
+               keyfilename, strerror (errno));
+      return -1;
+    }
+    key_len = fread(bearertoken, 1, sizeof(bearertoken), fp);
+    lprintf (0, "Read key_len: %d", key_len);
+    fclose(fp);
+    bearertoken[key_len] = '\0';
+    if (bearertoken[key_len-1] == '\n') {
+      bearertoken[key_len-1] = '\0'; //zap newline
+    }
+
 
     /* Proceed to token verification */
 
