@@ -56,6 +56,7 @@ AuthDir your/auth/directory
 which should contain your secret as
 secret.key, paste your brgy token here (from AuthServer)
 also add AuthServer link in config file for example: AuthServer http://172.22.0.3:5000/accounts/verifySensorToken
+./ringserver -vv ./doc/ring.conf
 
 #use slink2dali with auth option:
 TOKEN=paste_citizen_token
