@@ -955,8 +955,8 @@ HandleNegotiation (ClientInfo *cinfo)
 
           size_t pattern_str_size = (strlen(streamIdStr)+1) * sizeof(char);
           if (pattern_str_size > DL_MAX_STREAMID_STR_LEN){
-            lprintf(0, "Length of streamId string (%d) exceeded maximum: %zu",
-                num_streams, DL_MAX_STREAMID_STR_LEN);
+            lprintf(0, "Length of streamId string (%s, %d) exceeded maximum: %zu",
+                streamIdStr, pattern_str_size, DL_MAX_STREAMID_STR_LEN);
             json_decref(exp_ptr);
             json_decref(decodedSenderToken);
             json_decref(jsonResponse);
