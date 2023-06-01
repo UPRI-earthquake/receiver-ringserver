@@ -1,7 +1,22 @@
 /**************************************************************************
  * ringserver.h
  *
- * Modified: 2016.339
+ * This file is part of the ringserver.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * Copyright (C) 2020:
+ * @author Chad Trabant, IRIS Data Management Center
  **************************************************************************/
 
 #ifndef RINGSERVER_H
@@ -15,7 +30,7 @@ extern "C" {
 #endif
 
 #define PACKAGE   "ringserver"
-#define VERSION   "2018.078"
+#define VERSION   "2020.075"
 
 /* Thread data flags */
 #define TDF_SPAWNING    (1<<0)          /* Thread is now spawning   */
@@ -41,7 +56,10 @@ struct thread_data {
 #define PROTO_DATALINK  0x01
 #define PROTO_SEEDLINK  0x02
 #define PROTO_HTTP      0x04
-#define PROTO_ALL       0xFF
+#define FAMILY_IPv4     0x08
+#define FAMILY_IPv6     0x10
+
+#define PROTO_ALL (PROTO_DATALINK | PROTO_SEEDLINK | PROTO_HTTP)
 
 /* Doubly-linkable structure to list server threads */
 struct sthread {

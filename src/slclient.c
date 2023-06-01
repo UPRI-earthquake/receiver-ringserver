@@ -20,24 +20,22 @@
  * the most recent packet ID requested by the client and setting the
  * ring to that position.
  *
- * Copyright 2016 Chad Trabant, IRIS Data Management Center
+ * This file is part of the ringserver.
  *
- * This file is part of ringserver.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * ringserver is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published
- * by the Free Software Foundation, either version 3 of the License,
- * or (at your option) any later version.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * ringserver is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
- * You should have received a copy of the GNU General Public License
- * along with ringserver. If not, see http://www.gnu.org/licenses/.
- *
- * Modified: 2018.047
+ * Copyright (C) 2020:
+ * @author Chad Trabant, IRIS Data Management Center
  **************************************************************************/
 
 /* Unsupported protocol features:
@@ -84,17 +82,17 @@ static void SendInfoRecord (char *record, int reclen, void *vcinfo);
 static void FreeStaNode (void *rbnode);
 static void FreeNetStaNode (void *rbnode);
 static int StaKeyCompare (const void *a, const void *b);
-static SLStaNode *GetStaNode (RBTree *tree, char *net, char *sta);
-static SLNetStaNode *GetNetStaNode (RBTree *tree, char *net, char *sta);
-static int StationToRegex (char *net, char *sta, char *selectors,
+static SLStaNode *GetStaNode (RBTree *tree, const char *net, const char *sta);
+static SLNetStaNode *GetNetStaNode (RBTree *tree, const char *net, const char *sta);
+static int StationToRegex (const char *net, const char *sta, const char *selectors,
                            char **matchregex, char **rejectregex);
-static int SelectToRegex (char *net, char *sta, char *select,
+static int SelectToRegex (const char *net, const char *sta, const char *select,
                           char **regex);
 
 /***********************************************************************
  * SLHandleCmd:
  *
- * Handle DataLink command, which is expected to be in the
+ * Handle SeedLink command, which is expected to be in the
  * ClientInfo.recvbuf buffer.
  *
  * Returns zero on success, negative value on error.  On error the
@@ -223,9 +221,11 @@ SLHandleCmd (ClientInfo *cinfo)
         else
           retval = 0;
 
-        /* Requested packet must be valid and have a matching data start time */
+        /* Requested packet must be valid and have a matching data start time
+         * Limit packet time matching to integer seconds to match SeedLink syntax limits */
         if (retval == stanode->packetid &&
-            (stanode->datastart == HPTERROR || stanode->datastart == cinfo->packet.datastart))
+            (stanode->datastart == HPTERROR ||
+             (int64_t)(MS_HPTIME2EPOCH(stanode->datastart)) == (int64_t)(MS_HPTIME2EPOCH(cinfo->packet.datastart))))
         {
           /* Use this packet ID if it is newer than any previous newest */
           if (newesttime == 0 || cinfo->packet.pkttime > newesttime)
@@ -245,30 +245,23 @@ SLHandleCmd (ClientInfo *cinfo)
     /* Position ring to starting packet ID if specified */
     if (slinfo->startid > 0)
     {
-      int64_t reqid;
-
-      /* SeedLink clients always resume data flow by requesting: lastpacket + 1
-       * The ring needs to be positioned to the actual last packet ID for RINGNEXT */
-
-      reqid = (slinfo->startid == 1) ? cinfo->ringparams->maxpktid : (slinfo->startid - 1);
-
-      retval = RingPosition (cinfo->reader, reqid, HPTERROR);
+      retval = RingPosition (cinfo->reader, slinfo->startid, HPTERROR);
 
       if (retval < 0)
       {
-        lprintf (0, "[%s] Error with RingPosition for '%lld'",
-                 cinfo->hostname, reqid);
+        lprintf (0, "[%s] Error with RingPosition for %" PRId64,
+                 cinfo->hostname, slinfo->startid);
         return -1;
       }
       else if (retval == 0)
       {
-        lprintf (0, "[%s] Could not find and position to packet ID: %lld",
-                 cinfo->hostname, reqid);
+        lprintf (0, "[%s] Could not find and position to packet ID: %" PRId64,
+                 cinfo->hostname, slinfo->startid);
       }
       else
       {
-        lprintf (2, "[%s] Positioned ring to packet ID: %lld",
-                 cinfo->hostname, reqid);
+        lprintf (2, "[%s] Positioned ring to packet ID: %" PRId64,
+                 cinfo->hostname, slinfo->startid);
       }
     }
 
@@ -324,7 +317,7 @@ SLHandleCmd (ClientInfo *cinfo)
 
       if (readid < 0)
       {
-        lprintf (0, "[%s] Error with RingAfter time: %s [%lld]",
+        lprintf (0, "[%s] Error with RingAfter time: %s [%" PRId64 "]",
                  cinfo->hostname, timestr, cinfo->starttime);
         SendReply (cinfo, "ERROR", "Error positioning reader to start of time window");
         return -1;
@@ -332,13 +325,13 @@ SLHandleCmd (ClientInfo *cinfo)
 
       if (readid == 0)
       {
-        lprintf (2, "[%s] No packet found for RingAfter time: %s, positioning to next packet",
+        lprintf (2, "[%s] No packet found for RingAfter time: %s [%" PRId64 "], positioning to next packet",
                  cinfo->hostname, timestr, cinfo->starttime);
         cinfo->reader->pktid = RINGNEXT;
       }
       else
       {
-        lprintf (2, "[%s] Positioned to packet %lld, first after: %s",
+        lprintf (2, "[%s] Positioned to packet %" PRId64 ", first after: %s",
                  cinfo->hostname, readid, timestr);
       }
     }
@@ -360,10 +353,15 @@ SLHandleCmd (ClientInfo *cinfo)
 /***********************************************************************
  * SLStreamPackets:
  *
- * Send selected ring packets to DataLink client.
+ * Send selected ring packets to SeedLink client.
  *
- * Returns packet size sent on success, zero when no packet sent,
- * negative value on error.  On error the client should disconnected.
+ * The next read packet is only be sent if the type is allowed by
+ * SeedLink, e.g. miniSEED, but the size is returned to the caller
+ * to indicate that a packet was available.
+ *
+ * Return packet size processed on successful read from ring, zero
+ * when no next packet is available, or negative value on error.  On
+ * error the client should disconnected.
  ***********************************************************************/
 int
 SLStreamPackets (ClientInfo *cinfo)
@@ -387,9 +385,9 @@ SLStreamPackets (ClientInfo *cinfo)
     lprintf (0, "[%s] Error reading next packet from ring", cinfo->hostname);
     return -1;
   }
-  else if (readid > 0 && MS_ISVALIDHEADER (cinfo->packetdata) && cinfo->packet.datasize == SLRECSIZE)
+  else if (readid > 0 && MS_ISVALIDHEADER (cinfo->packetdata))
   {
-    lprintf (3, "[%s] Read %s (%u bytes) packet ID %lld from ring",
+    lprintf (3, "[%s] Read %s (%u bytes) packet ID %" PRId64 " from ring",
              cinfo->hostname, cinfo->packet.streamid, cinfo->packet.datasize, cinfo->packet.pktid);
 
     /* Get (creating if needed) the StreamNode for this streamid */
@@ -406,17 +404,6 @@ SLStreamPackets (ClientInfo *cinfo)
       lprintf (3, "[%s] New stream for client: %s", cinfo->hostname, cinfo->packet.streamid);
       cinfo->streamscount++;
     }
-
-    /* Perform time-windowing start time check */
-    /* This check will skip the packets containing the start time
-       if  ( cinfo->starttime != 0 && cinfo->starttime != HPTERROR )
-       {
-       if ( cinfo->packet.datastart < cinfo->starttime )
-       {
-       skiprecord = 1;
-       }
-       }
-    */
 
     /* Perform time-windowing end time checks */
     if (cinfo->endtime != 0 && cinfo->endtime != HPTERROR)
@@ -453,7 +440,7 @@ SLStreamPackets (ClientInfo *cinfo)
     if (!skiprecord)
     {
       /* Send miniSEED record to client */
-      if (SendRecord (&cinfo->packet, cinfo->packetdata, SLRECSIZE, cinfo))
+      if (SendRecord (&cinfo->packet, cinfo->packetdata, cinfo->packet.datasize, cinfo))
       {
         if (cinfo->socketerr != 2)
           lprintf (0, "[%s] Error sending record to client", cinfo->hostname);
@@ -559,7 +546,7 @@ HandleNegotiation (ClientInfo *cinfo)
     if (bytes >= sizeof (sendbuffer))
     {
       lprintf (0, "[%s] Response to HELLO is likely truncated: '%*s'",
-               sizeof (sendbuffer), sendbuffer);
+               cinfo->hostname, (int)sizeof (sendbuffer), sendbuffer);
     }
 
     if (SendData (cinfo, sendbuffer, strlen (sendbuffer)))
@@ -766,6 +753,11 @@ HandleNegotiation (ClientInfo *cinfo)
     starttimestr[0] = '\0';
     fields = sscanf (cinfo->recvbuf, "%*s %x %50s %c",
                      &startpacket, starttimestr, &junk);
+
+    /* SeedLink clients resume data flow by requesting: lastpacket + 1
+     * The ring needs to be positioned to the actual last packet ID for RINGNEXT,
+     * so set the starting packet to the last actual packet received by the client. */
+    startpacket = (startpacket == 1) ? cinfo->ringparams->maxpktid : (startpacket - 1);
 
     /* Make sure we got zero, one or two arguments */
     if (fields > 2)
@@ -1041,7 +1033,7 @@ HandleInfo (ClientInfo *cinfo)
   }
 
   /* Allocate miniSEED record buffer */
-  if ((record = calloc (1, SLRECSIZE)) == NULL)
+  if ((record = calloc (1, INFORECSIZE)) == NULL)
   {
     lprintf (0, "[%s] Error allocating receive buffer", cinfo->hostname);
     return -1;
@@ -1196,7 +1188,7 @@ HandleInfo (ClientInfo *cinfo)
       while ((stream = (RingStream *)StackPop (streams)))
       {
         /* Split the streamid to get the network and station codes,
-           assumed strream pattern: "NET_STA_LOC_CHAN/MSEED" */
+           assumed stream pattern: "NET_STA_LOC_CHAN/MSEED" */
         if (SplitStreamID (stream->streamid, '_', 10, net, sta, NULL, NULL, NULL, NULL, NULL) != 2)
         {
           lprintf (0, "[%s] Error splitting stream ID: %s", cinfo->hostname, stream->streamid);
@@ -1291,7 +1283,7 @@ HandleInfo (ClientInfo *cinfo)
       while ((stream = (RingStream *)StackPop (streams)))
       {
         /* Split the streamid to get the network and station codes,
-           assumed strream pattern: "NET_STA_LOC_CHAN/MSEED" */
+           assumed stream pattern: "NET_STA_LOC_CHAN/MSEED" */
         if (SplitStreamID (stream->streamid, '_', 10, net, sta, NULL, NULL, NULL, NULL, NULL) != 2)
         {
           lprintf (0, "[%s] Error splitting stream ID: %s", cinfo->hostname, stream->streamid);
@@ -1352,7 +1344,7 @@ HandleInfo (ClientInfo *cinfo)
           while ((stream = (RingStream *)StackPop (netstanode->streams)))
           {
             /* Split the streamid to get the network, station, location & channel codes
-               assumed strream pattern: "NET_STA_LOC_CHAN/MSEED" */
+               assumed stream pattern: "NET_STA_LOC_CHAN/MSEED" */
             if (SplitStreamID (stream->streamid, '_', 10, net, sta, loc, chan, NULL, NULL, NULL) != 4)
             {
               lprintf (0, "[%s] Error splitting stream ID: %s", cinfo->hostname, stream->streamid);
@@ -1589,7 +1581,7 @@ HandleInfo (ClientInfo *cinfo)
     /* Pack all XML into 512-byte records and send to client */
     if (!cinfo->socketerr)
     {
-      char seqnumstr[7];
+      char seqnumstr[11];
       int seqnum = 1;
       int offset = 0;
       int nsamps;
@@ -1599,7 +1591,7 @@ HandleInfo (ClientInfo *cinfo)
         nsamps = ((xmllength - offset) > 456) ? 456 : (xmllength - offset);
 
         /* Update sequence number and number of samples */
-        snprintf (seqnumstr, 7, "%06d", seqnum);
+        snprintf (seqnumstr, sizeof(seqnumstr), "%06d", seqnum);
         memcpy (fsdh->sequence_number, seqnumstr, 6);
 
         fsdh->numsamples = nsamps;
@@ -1629,7 +1621,7 @@ HandleInfo (ClientInfo *cinfo)
           slinfo->terminfo = 0;
 
         /* Send INFO record to client, blind toss */
-        SendInfoRecord (record, SLRECSIZE, cinfo);
+        SendInfoRecord (record, INFORECSIZE, cinfo);
       }
     }
   }
@@ -1696,25 +1688,17 @@ SendRecord (RingPacket *packet, char *record, int reclen, void *vcinfo)
   if (!record || !vcinfo)
     return -1;
 
-  /* Check that record is SLRECSIZE-bytes */
-  if (reclen != SLRECSIZE)
-  {
-    lprintf (0, "[%s] data record is not %d bytes as expected: %d",
-             cinfo->hostname, SLRECSIZE, reclen);
-    return -1;
-  }
-
   /* Check that sequence number is not too big */
   if (packet->pktid > 0xFFFFFF)
   {
-    lprintf (0, "[%s] sequence number too large for SeedLink: %d",
+    lprintf (0, "[%s] sequence number too large for SeedLink: %" PRId64,
              cinfo->hostname, packet->pktid);
   }
 
   /* Create SeedLink header: signature + sequence number */
   snprintf (header, sizeof (header), "SL%06" PRIX64, packet->pktid);
 
-  if (SendDataMB (cinfo, (void *[]){header, record}, (size_t[]){SLHEADSIZE, SLRECSIZE}, 2))
+  if (SendDataMB (cinfo, (void *[]){header, record}, (size_t[]){SLHEADSIZE, reclen}, 2))
     return -1;
 
   /* Update the time of the last packet exchange */
@@ -1741,20 +1725,13 @@ SendInfoRecord (char *record, int reclen, void *vcinfo)
   if (!record || !vcinfo)
     return;
 
-  /* Check that record is SLRECSIZE-bytes */
-  if (reclen != SLRECSIZE)
-  {
-    lprintf (0, "[%s] data record is not %d bytes: %d", SLRECSIZE, reclen);
-    return;
-  }
-
   /* Create INFO signature according to termination flag */
   if (slinfo->terminfo)
     memcpy (header, "SLINFO  ", SLHEADSIZE);
   else
     memcpy (header, "SLINFO *", SLHEADSIZE);
 
-  SendDataMB (cinfo, (void *[]){header, record}, (size_t[]){SLHEADSIZE, SLRECSIZE}, 2);
+  SendDataMB (cinfo, (void *[]){header, record}, (size_t[]){SLHEADSIZE, reclen}, 2);
 
   /* Update the time of the last packet exchange */
   cinfo->lastxchange = HPnow ();
@@ -1841,7 +1818,7 @@ StaKeyCompare (const void *a, const void *b)
  * Return a pointer to a SLStaNode or 0 for error.
  ***************************************************************************/
 static SLStaNode *
-GetStaNode (RBTree *tree, char *net, char *sta)
+GetStaNode (RBTree *tree, const char *net, const char *sta)
 {
   SLStaKey stakey;
   SLStaKey *newstakey;
@@ -1849,8 +1826,9 @@ GetStaNode (RBTree *tree, char *net, char *sta)
   RBNode *rbnode;
 
   /* Create SLStaKey */
-  strncpy (stakey.net, net, sizeof (stakey.net));
-  strncpy (stakey.sta, sta, sizeof (stakey.sta));
+  memset (&stakey, 0, sizeof (stakey));
+  strncpy (stakey.net, net, sizeof (stakey.net) - 1);
+  strncpy (stakey.sta, sta, sizeof (stakey.sta) - 1);
 
   /* Search for a matching SLStaNode entry */
   if ((rbnode = RBFind (tree, &stakey)))
@@ -1895,7 +1873,7 @@ GetStaNode (RBTree *tree, char *net, char *sta)
  * Return a pointer to a SLNetStaNode or 0 for error.
  ***************************************************************************/
 static SLNetStaNode *
-GetNetStaNode (RBTree *tree, char *net, char *sta)
+GetNetStaNode (RBTree *tree, const char *net, const char *sta)
 {
   SLStaKey stakey;
   SLStaKey *newstakey;
@@ -1903,8 +1881,9 @@ GetNetStaNode (RBTree *tree, char *net, char *sta)
   RBNode *rbnode;
 
   /* Create SLStaKey */
-  strncpy (stakey.net, net, sizeof (stakey.net));
-  strncpy (stakey.sta, sta, sizeof (stakey.sta));
+  memset (&stakey, 0, sizeof (stakey));
+  strncpy (stakey.net, net, sizeof (stakey.net) - 1);
+  strncpy (stakey.sta, sta, sizeof (stakey.sta) - 1);
 
   /* Search for a matching SLNetStaNode entry */
   if ((rbnode = RBFind (tree, &stakey)))
@@ -1927,8 +1906,8 @@ GetNetStaNode (RBTree *tree, char *net, char *sta)
       return 0;
     }
 
-    strncpy (netstanode->net, net, sizeof (netstanode->net));
-    strncpy (netstanode->sta, sta, sizeof (netstanode->sta));
+    strncpy (netstanode->net, net, sizeof (netstanode->net) - 1);
+    strncpy (netstanode->sta, sta, sizeof (netstanode->sta) - 1);
 
     /* Initialize Stack of associated streams */
     netstanode->streams = StackCreate ();
@@ -1948,7 +1927,7 @@ GetNetStaNode (RBTree *tree, char *net, char *sta)
  * Return 0 on success and -1 on error.
  ***************************************************************************/
 static int
-StationToRegex (char *net, char *sta, char *selectors,
+StationToRegex (const char *net, const char *sta, const char *selectors,
                 char **matchregex, char **rejectregex)
 {
   char *selectorlist;
@@ -2046,6 +2025,7 @@ StationToRegex (char *net, char *sta, char *selectors,
   return 0;
 } /* End of StationToRegex() */
 
+
 /***************************************************************************
  * SelectToRegex:
  *
@@ -2068,180 +2048,177 @@ StationToRegex (char *net, char *sta, char *selectors,
  * Return 0 on success and -1 on error.
  ***************************************************************************/
 static int
-SelectToRegex (char *net, char *sta, char *select, char **regex)
+SelectToRegex (const char *net, const char *sta, const char *select, char **regex)
 {
-  char newpattern[100];
-  char loc[10];
-  char chan[10];
-  char *ptr;
+  const char *ptr;
+  char pattern[50];
+  char *build = pattern;
+  int idx;
   int length;
   int retval;
 
   if (!regex)
     return -1;
 
-  /* New pattern buffer */
-  newpattern[0] = '\0';
-
   /* Start pattern with a '^' */
-  strncat (newpattern, "^", 1);
+  *build++ = '^';
+
+  /* Santiy check lengths of input strings */
+  if (net && strlen (net) > 10)
+    return -1;
+  if (sta && strlen (sta) > 10)
+    return -1;
+  if (select && strlen(select) > 7)
+    return -1;
 
   if (net)
   {
-    /* Sanity check of network string */
-    if (strlen (net) > 10)
-      return -1;
-
     /* Translate network */
     ptr = net;
     while (*ptr)
     {
       if (*ptr == '?')
-        strncat (newpattern, ".", 1);
+      {
+        *build++ = '.';
+      }
       else if (*ptr == '*')
-        strncat (newpattern, ".*", 2);
+      {
+        *build++ = '.';
+        *build++ = '*';
+      }
       else
-        strncat (newpattern, ptr, 1);
+      {
+        *build++ = *ptr;
+      }
 
       ptr++;
     }
   }
   else
   {
-    strncat (newpattern, ".*", 2);
+    *build++ = '.';
+    *build++ = '*';
   }
 
   /* Add separator */
-  strncat (newpattern, "_", 1);
+  *build++ = '_';
 
   if (sta)
   {
-    /* Sanity check of station string */
-    if (strlen (sta) > 10)
-      return -1;
-
     /* Translate station */
     ptr = sta;
     while (*ptr)
     {
       if (*ptr == '?')
-        strncat (newpattern, ".", 1);
+      {
+        *build++ = '?';
+      }
       else if (*ptr == '*')
-        strncat (newpattern, ".*", 2);
+      {
+        *build++ = '.';
+        *build++ = '*';
+      }
       else
-        strncat (newpattern, ptr, 1);
+      {
+        *build++ = *ptr;
+      }
 
       ptr++;
     }
   }
   else
   {
-    strncat (newpattern, ".*", 2);
+    *build++ = '.';
+    *build++ = '*';
   }
 
   /* Add separator */
-  strncat (newpattern, "_", 1);
+  *build++ = '_';
 
   if (select)
   {
-    /* Truncate selector at any period, DECOTL subtypes are not supported */
+    /* Ingore selector after any period, DECOTL subtypes are not supported */
     if ((ptr = strrchr (select, '.')))
-    {
-      *ptr = '\0';
-    }
-
-    length = strlen (select);
+      length = ptr - select;
+    else
+      length = strlen (select);
 
     /* If location and channel are specified */
     if (length == 5)
     {
-      /* Split location and channel parts */
-      loc[0] = '\0';
-      chan[0] = '\0';
-      strncat (loc, select, 2);
-      ptr = select + 2;
-      strncat (chan, ptr, 3);
-
       /* Translate location, '-' means space location which is collapsed */
-      ptr = loc;
-      while (*ptr)
+      for (ptr = select, idx = 0; idx < 2; idx++, ptr++)
       {
         if (*ptr == '?')
-          strncat (newpattern, ".", 1);
+          *build++ = '.';
         else if (*ptr != '-')
-          strncat (newpattern, ptr, 1);
-
-        ptr++;
+          *build++ = *ptr;
       }
 
       /* Add separator */
-      strcat (newpattern, "_");
+      *build++ = '_';
 
       /* Translate channel */
-      ptr = chan;
-      while (*ptr)
+      for (ptr = &select[2], idx = 0; idx < 3; idx++, ptr++)
       {
         if (*ptr == '?')
-          strncat (newpattern, ".", 1);
+          *build++ = '.';
         else
-          strncat (newpattern, ptr, 1);
-
-        ptr++;
+          *build++ = *ptr;
       }
     }
     /* If only location is specified */
     else if (length == 2)
     {
       /* Translate location, '-' means space location which is collapsed */
-      ptr = select;
-      while (*ptr)
+      for (ptr = select, idx = 0; idx < 2; idx++, ptr++)
       {
         if (*ptr == '?')
-          strncat (newpattern, ".", 1);
+          *build++ = '.';
         else if (*ptr != '-')
-          strncat (newpattern, ptr, 1);
-
-        ptr++;
+          *build++ = *ptr;
       }
 
       /* Add separator */
-      strncat (newpattern, "_", 1);
+      *build++ = '_';
     }
     /* If only channel is specified */
     else if (length == 3)
     {
       /* Add wildcard for location and separator */
-      strcat (newpattern, ".*_");
+      *build++ = '.';
+      *build++ = '*';
+      *build++ = '_';
 
       /* Translate channel */
-      ptr = select;
-      while (*ptr)
+      for (ptr = select, idx = 0; idx < 3; idx++, ptr++)
       {
         if (*ptr == '?')
-          strncat (newpattern, ".", 1);
+          *build++ = '.';
         else
-          strncat (newpattern, ptr, 1);
-
-        ptr++;
+          *build++ = *ptr;
       }
     }
   }
   else
   {
-    strncat (newpattern, ".*", 2);
+    *build++ = '.';
+    *build++ = '*';
   }
 
   /* Add final catch-all for remaining stream ID parts if not already done */
   if (select)
   {
-    strncat (newpattern, ".*", 2);
+    *build++ = '.';
+    *build++ = '*';
   }
 
-  /* End pattern with a '$' */
-  strncat (newpattern, "$", 1);
+  /* End pattern with a '$' and terminate */
+  *build++ = '$';
+  *build++ = '\0';
 
   /* Add new pattern to regex string, expanding as needed up to SLMAXREGEXLEN bytes*/
-  if ((retval = AddToString (regex, newpattern, "|", 0, SLMAXREGEXLEN)))
+  if ((retval = AddToString (regex, pattern, "|", 0, SLMAXREGEXLEN)))
   {
     if (retval == -1)
     {

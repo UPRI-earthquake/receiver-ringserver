@@ -3,24 +3,22 @@
  *
  * HTTP handling.
  *
- * Copyright 2016 Chad Trabant, IRIS Data Management Center
+ * This file is part of the ringserver.
  *
- * This file is part of ringserver.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * ringserver is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published
- * by the Free Software Foundation, either version 3 of the License,
- * or (at your option) any later version.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * ringserver is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
- * You should have received a copy of the GNU General Public License
- * along with ringserver. If not, see http://www.gnu.org/licenses/.
- *
- * Modified: 2018.078
+ * Copyright (C) 2020:
+ * @author Chad Trabant, IRIS Data Management Center
  **************************************************************************/
 
 /* _GNU_SOURCE needed to get strcasestr() under Linux */
@@ -1144,7 +1142,7 @@ static int
 GenerateStatus (ClientInfo *cinfo, char **status)
 {
   struct sthread *loopstp;
-  char string[400];
+  char string[4096];
   char serverstart[50];
   char ringversion[15];
   char ringsize[30];
@@ -1358,7 +1356,7 @@ GenerateConnections (ClientInfo *cinfo, char **connectionlist, char *path)
     match = pcre_compile (matchstr, 0, &errptr, &erroffset, NULL);
     if (errptr)
     {
-      lprintf (0, "[%s] Error with pcre_compile: %s", errptr);
+      lprintf (0, "[%s] Error with pcre_compile: %s", cinfo->hostname, errptr);
       matchlen = 0;
     }
   }
@@ -1482,7 +1480,6 @@ SendFileHTTP (ClientInfo *cinfo, char *path)
   char filebuffer[65535];
   size_t bytes;
   size_t length;
-  int rv;
 
   if (!path || !cinfo)
     return -1;
@@ -1557,17 +1554,15 @@ SendFileHTTP (ClientInfo *cinfo, char *path)
   }
 
   /* Create header */
-  rv = asprintf (&response,
-                 "HTTP/1.1 200\r\n"
-                 "Content-Length: %llu\r\n"
-                 "Content-Type: %s\n"
-                 "%s"
-                 "\r\n",
-                 (long long unsigned int)filestat.st_size,
-                 contenttype,
-                 (cinfo->httpheaders) ? cinfo->httpheaders : "");
-
-  if (rv < 0)
+  if (asprintf (&response,
+                "HTTP/1.1 200\r\n"
+                "Content-Length: %llu\r\n"
+                "Content-Type: %s\n"
+                "%s"
+                "\r\n",
+                (long long unsigned int)filestat.st_size,
+                contenttype,
+                (cinfo->httpheaders) ? cinfo->httpheaders : "") < 0)
   {
     fclose (fp);
     return -1;
@@ -1628,23 +1623,22 @@ NegotiateWebSocket (ClientInfo *cinfo, char *version,
 
   if (!version || strcasecmp (version, "HTTP/1.1"))
   {
-    asprintf (&response,
-              "HTTP/1.1 400 Protocol Version Must Be 1.1 For WebSocket\r\n"
-              "%s"
-              "\r\n"
-              "HTTP Version Must Be 1.1 For WebSocket\n"
-              "Received: '%s'\n",
-              (cinfo->httpheaders) ? cinfo->httpheaders : "",
-              (version) ? version : "");
+    if (asprintf (&response,
+                  "HTTP/1.1 400 Protocol Version Must Be 1.1 For WebSocket\r\n"
+                  "%s"
+                  "\r\n"
+                  "HTTP Version Must Be 1.1 For WebSocket\n"
+                  "Received: '%s'\n",
+                  (cinfo->httpheaders) ? cinfo->httpheaders : "",
+                  (version) ? version : "") < 0)
+    {
+      lprintf (0, "Cannot allocate memory for response (wrong protocol)");
+    }
 
     if (response)
     {
       SendData (cinfo, response, strlen (response));
       free (response);
-    }
-    else
-    {
-      lprintf (0, "Cannot allocate memory for response (wrong protocol)");
     }
 
     return -1;
@@ -1652,23 +1646,22 @@ NegotiateWebSocket (ClientInfo *cinfo, char *version,
 
   if (!upgradeHeader || strcasecmp (upgradeHeader, "websocket"))
   {
-    asprintf (&response,
-              "HTTP/1.1 400 Upgrade Header Not Recognized\r\n"
-              "%s"
-              "\r\n"
-              "The Upgrade header value must be 'websocket'\n"
-              "Received: '%s'\n",
-              (cinfo->httpheaders) ? cinfo->httpheaders : "",
-              (upgradeHeader) ? upgradeHeader : "");
+    if (asprintf (&response,
+                  "HTTP/1.1 400 Upgrade Header Not Recognized\r\n"
+                  "%s"
+                  "\r\n"
+                  "The Upgrade header value must be 'websocket'\n"
+                  "Received: '%s'\n",
+                  (cinfo->httpheaders) ? cinfo->httpheaders : "",
+                  (upgradeHeader) ? upgradeHeader : "") < 0)
+    {
+      lprintf (0, "Cannot allocate memory for response (wrong Upgrade)");
+    }
 
     if (response)
     {
       SendData (cinfo, response, strlen (response));
       free (response);
-    }
-    else
-    {
-      lprintf (0, "Cannot allocate memory for response (wrong Upgrade)");
     }
 
     return -1;
@@ -1676,23 +1669,22 @@ NegotiateWebSocket (ClientInfo *cinfo, char *version,
 
   if (!connectionHeader || !strcasestr (connectionHeader, "Upgrade"))
   {
-    asprintf (&response,
-              "HTTP/1.1 400 Connection Header Not Recognized\r\n"
-              "%s"
-              "\r\n"
-              "The Connection header value must be 'Upgrade'\n"
-              "Received: '%s'\n",
-              (cinfo->httpheaders) ? cinfo->httpheaders : "",
-              (connectionHeader) ? connectionHeader : "");
+    if (asprintf (&response,
+                  "HTTP/1.1 400 Connection Header Not Recognized\r\n"
+                  "%s"
+                  "\r\n"
+                  "The Connection header value must be 'Upgrade'\n"
+                  "Received: '%s'\n",
+                  (cinfo->httpheaders) ? cinfo->httpheaders : "",
+                  (connectionHeader) ? connectionHeader : "") < 0)
+    {
+      lprintf (0, "Cannot allocate memory for response (wrong Connection)");
+    }
 
     if (response)
     {
       SendData (cinfo, response, strlen (response));
       free (response);
-    }
-    else
-    {
-      lprintf (0, "Cannot allocate memory for response (wrong Connection)");
     }
 
     return -1;
@@ -1700,23 +1692,22 @@ NegotiateWebSocket (ClientInfo *cinfo, char *version,
 
   if (!secWebSocketVersionHeader || strcasecmp (secWebSocketVersionHeader, "13"))
   {
-    asprintf (&response,
-              "HTTP/1.1 400 Sec-WebSocket-Version Must Be 13\r\n"
-              "%s"
-              "\r\n"
-              "The Sec-WebSocket-Key header is required\n"
-              "Received: '%s'\n",
-              (cinfo->httpheaders) ? cinfo->httpheaders : "",
-              (secWebSocketVersionHeader) ? secWebSocketVersionHeader : "");
+    if (asprintf (&response,
+                  "HTTP/1.1 400 Sec-WebSocket-Version Must Be 13\r\n"
+                  "%s"
+                  "\r\n"
+                  "The Sec-WebSocket-Key header is required\n"
+                  "Received: '%s'\n",
+                  (cinfo->httpheaders) ? cinfo->httpheaders : "",
+                  (secWebSocketVersionHeader) ? secWebSocketVersionHeader : "") < 0)
+    {
+      lprintf (0, "Cannot allocate memory for response (wrong Sec-WebSocket-Version)");
+    }
 
     if (response)
     {
       SendData (cinfo, response, strlen (response));
       free (response);
-    }
-    else
-    {
-      lprintf (0, "Cannot allocate memory for response (wrong Sec-WebSocket-Version)");
     }
 
     return -1;
@@ -1724,21 +1715,20 @@ NegotiateWebSocket (ClientInfo *cinfo, char *version,
 
   if (!secWebSocketKeyHeader)
   {
-    asprintf (&response,
-              "HTTP/1.1 400 Sec-WebSocket-Key Header Must Be Present\r\n"
-              "%s"
-              "\r\n"
-              "The Sec-WebSocket-Key header is required\n",
-              (cinfo->httpheaders) ? cinfo->httpheaders : "");
+    if (asprintf (&response,
+                  "HTTP/1.1 400 Sec-WebSocket-Key Header Must Be Present\r\n"
+                  "%s"
+                  "\r\n"
+                  "The Sec-WebSocket-Key header is required\n",
+                  (cinfo->httpheaders) ? cinfo->httpheaders : "") < 0)
+    {
+      lprintf (0, "Cannot allocate memory for response (wrong Sec-WebSocket-Key) ");
+    }
 
     if (response)
     {
       SendData (cinfo, response, strlen (response));
       free (response);
-    }
-    else
-    {
-      lprintf (0, "Cannot allocate memory for response (wrong Sec-WebSocket-Key) ");
     }
 
     return -1;
@@ -1749,7 +1739,7 @@ NegotiateWebSocket (ClientInfo *cinfo, char *version,
   keybufsize = keylength + 36;
   if (!(keybuf = (unsigned char *)malloc (keybufsize)))
   {
-    lprintf (0, "Cannot allocate memory for decoded key buffer (%zu bytes)", keybufsize);
+    lprintf (0, "Cannot allocate memory for decoded key buffer (%d bytes)", keybufsize);
     return -1;
   }
 
@@ -1769,17 +1759,21 @@ NegotiateWebSocket (ClientInfo *cinfo, char *version,
   }
 
   /* Generate response completing the upgrade to WebSocket connection */
-  asprintf (&response,
-            "HTTP/1.1 101 Switching Protocols\r\n"
-            "Upgrade: websocket\r\n"
-            "Connection: Upgrade\r\n"
-            "%s"
-            "%s"
-            "Sec-WebSocket-Accept: %s\r\n"
-            "\r\n",
-            (cinfo->httpheaders) ? cinfo->httpheaders : "",
-            subprotocolheader,
-            keybuf);
+  if (asprintf (&response,
+                "HTTP/1.1 101 Switching Protocols\r\n"
+                "Upgrade: websocket\r\n"
+                "Connection: Upgrade\r\n"
+                "%s"
+                "%s"
+                "Sec-WebSocket-Accept: %s\r\n"
+                "\r\n",
+                (cinfo->httpheaders) ? cinfo->httpheaders : "",
+                subprotocolheader,
+                keybuf) < 0)
+  {
+    lprintf (0, "Cannot allocate memory for response");
+    return -1;
+  }
 
   if (response)
   {

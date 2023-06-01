@@ -5,9 +5,8 @@
  *
  * Recursively scan one or more directory structures and continuously
  * check for file modifications.  The files are presumed to be
- * composed of miniSEED records of length MSSCAN_RECSIZE.
- * As the files are appended or created the new records will be read
- * and inserted into the ring.
+ * composed of miniSEED records.  As the files are appended or created
+ * the new records will be read and inserted into the ring.
  *
  * The file scanning logic employs the concept of active, idle and
  * quiet files.  Files that have not been modified for specified
@@ -36,24 +35,22 @@
  * If the signal SIGUSR1 is recieved the program will print the
  * current file list to standard error.
  *
- * Copyright 2016 Chad Trabant, IRIS Data Management Center
+ * This file is part of the ringserver.
  *
- * This file is part of ringserver.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * ringserver is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published
- * by the Free Software Foundation, either version 3 of the License,
- * or (at your option) any later version.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * ringserver is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
- * You should have received a copy of the GNU General Public License
- * along with ringserver. If not, see http://www.gnu.org/licenses/.
- *
- * Modified: 2015.074
+ * Copyright (C) 2020:
+ * @author Chad Trabant, IRIS Data Management Center
  ***************************************************************************/
 
 /* _GNU_SOURCE needed to get pread() under Linux */
@@ -82,6 +79,9 @@
 #include "ring.h"
 #include "ringserver.h"
 #include "stack.h"
+
+#define MSSCAN_MINRECLEN 40
+#define MSSCAN_READLEN 128
 
 /* The FileKey and FileNode structures form the key and data elements
  * of a balanced tree that is used to keep track of all files being
@@ -222,7 +222,7 @@ MS_ScanThread (void *arg)
     {
       /* Only log error if this is a change */
       if (mssinfo->accesserr == 0)
-        lprintf (0, "[MSeedScan] WARINING Cannot read base directory [%s]: %s",
+        lprintf (0, "[MSeedScan] WARNING Cannot read base directory [%s]: %s",
                  mssinfo->dirname, strerror (errno));
 
       mssinfo->accesserr = 1;
@@ -231,7 +231,7 @@ MS_ScanThread (void *arg)
     {
       /* Only log error if this is a change */
       if (mssinfo->accesserr == 0)
-        lprintf (0, "[MSeedScan] WARINING Base directory is not a directory [%s]",
+        lprintf (0, "[MSeedScan] WARNING Base directory is not a directory [%s]",
                  mssinfo->dirname);
 
       mssinfo->accesserr = 1;
@@ -341,6 +341,9 @@ MS_ScanThread (void *arg)
   if (mssinfo->fnreject_extra)
     pcre_free (mssinfo->fnreject_extra);
 
+  if (mssinfo->readbuffer)
+    free (mssinfo->readbuffer);
+
   if (mssinfo->msr)
     msr_free (&(mssinfo->msr));
 
@@ -432,7 +435,7 @@ ScanFiles (MSScanInfo *mssinfo, char *targetdir, int level, time_t scantime)
     /* Make sure the filename was not truncated */
     if (filenamelen >= (sizeof (filekeybuf) - sizeof (FileKey) - 1))
     {
-      lprintf (0, "[MSeedScan] Directory entry name beyond maximum of %d characters, skipping:",
+      lprintf (0, "[MSeedScan] Directory entry name beyond maximum of %lu characters, skipping:",
                (sizeof (filekeybuf) - sizeof (FileKey) - 1));
       lprintf (0, "  %s", ede->d_name);
       continue;
@@ -671,8 +674,6 @@ ProcessFile (MSScanInfo *mssinfo, char *filename, FileNode *fnode,
   int detlen;
   int flags;
   off_t newoffset = fnode->offset;
-  char mseedbuf[MSSCAN_RECSIZE];
-  int mseedsize = MSSCAN_RECSIZE;
   struct timespec treq, trem;
 
   lprintf (3, "[MSeedScan] Processing file %s", filename);
@@ -700,8 +701,8 @@ ProcessFile (MSScanInfo *mssinfo, char *filename, FileNode *fnode,
       return newoffset;
   }
 
-  /* Read MSSCAN_RECSIZE byte chunks off the end of the file */
-  while ((newsize - newoffset) >= MSSCAN_RECSIZE)
+  /* Read and process data while minimum record length is available */
+  while ((newsize - newoffset) >= MSSCAN_MINRECLEN)
   {
     /* Jump out if we've read the maximum allowed number of records
        from this file for this scan */
@@ -711,32 +712,32 @@ ProcessFile (MSScanInfo *mssinfo, char *filename, FileNode *fnode,
       break;
     }
 
-    /* Read the next record */
-    if ((nread = pread (fd, mseedbuf, MSSCAN_RECSIZE, newoffset)) != MSSCAN_RECSIZE)
+    /* Read up to MSSCAN_READLEN bytes into buffer */
+    if ((nread = pread (fd, mssinfo->readbuffer, MSSCAN_READLEN, newoffset)) <= 0)
     {
       if (!(shutdownsig && errno == EINTR))
       {
-        lprintf (0, "[MSeedScan] Error: only read %d bytes from %s", nread, filename);
+        lprintf (0, "[MSeedScan] Error: cannot read data from %s", filename);
         close (fd);
         return -1;
       }
       else
+      {
         return newoffset;
+      }
     }
 
-    newoffset += nread;
+    /* Check buffer for miniSEED */
+    detlen = ms_detect (mssinfo->readbuffer, nread);
 
-    /* Increment records read counter */
-    mssinfo->scanrecordsread++;
-
-    /* Check record for 1000 blockette and verify SEED structure */
-    if ((detlen = ms_detect (mseedbuf, MSSCAN_RECSIZE)) <= 0)
+    /* If miniSEED not detected or length could not be determined */
+    if (detlen <= 0)
     {
       /* If no data has ever been read from this file, ignore file */
       if (fnode->offset == 0)
       {
         lprintf (0, "[MSeedScan] %s: Not a valid miniSEED record at offset %lld, ignoring file",
-                 filename, (long long)(newoffset - nread));
+                 filename, (long long)newoffset);
         close (fd);
         return -1;
       }
@@ -744,37 +745,64 @@ ProcessFile (MSScanInfo *mssinfo, char *filename, FileNode *fnode,
       else
       {
         lprintf (0, "[MSeedScan] %s: Not a valid miniSEED record at offset %lld (new bytes %lld), skipping for this scan",
-                 filename, (long long)(newoffset - nread),
-                 (long long)(newsize - newoffset + nread));
+                 filename, (long long)newoffset, (long long)(newsize - newoffset));
         close (fd);
-        return (newoffset - nread);
+        return newoffset;
       }
     }
-    else if (detlen != MSSCAN_RECSIZE)
+    /* Record is larger than packet payload maximum, aka read buffer size */
+    else if (detlen > mssinfo->readbuffersize)
     {
-      lprintf (0, "[MSeedScan] %s: Unexpected record length: %d at offset %lld, ignoring file",
-               filename, detlen, (long long)(newoffset - nread));
+      lprintf (0, "[MSeedScan] %s: Record length (%d) at offset %lld, larger than packet payload size (%u), ignoring file",
+               filename, detlen, (long long)newoffset, mssinfo->readbuffersize);
       close (fd);
       return -1;
     }
-    /* Prepare for sending the record off to the DataLink ringserver */
-    else
+    /* File does not contain whole record, done for now */
+    else if (detlen > (newsize - newoffset))
     {
-      lprintf (4, "[MSeedScan] Sending %20.20s", mseedbuf);
+      return newoffset;
+    }
 
-      /* Send data record to the ringserver */
-      if (WriteRecord (mssinfo, mseedbuf, mseedsize))
+    /* Read the rest of the record */
+    if (detlen > nread)
+    {
+      if (pread (fd, mssinfo->readbuffer + nread, detlen - nread, newoffset + nread) != detlen - nread)
       {
-        return -newoffset;
+        if (!(shutdownsig && errno == EINTR))
+        {
+          lprintf (0, "[MSeedScan] Error: cannot read remaining record data from %s", filename);
+          close (fd);
+          return -1;
+        }
+        else
+        {
+          return newoffset;
+        }
       }
+    }
 
-      /* Increment records written counter */
-      if (mssinfo->iostats)
-        mssinfo->scanrecordswritten++;
+    newoffset += detlen;
 
-      /* Sleep for specified throttle interval */
-      if (mssinfo->throttlensec)
-        nanosleep (&treq, &trem);
+    /* Increment records read counter */
+    mssinfo->scanrecordsread++;
+
+    /* Write record to ring buffer */
+    if (WriteRecord (mssinfo, mssinfo->readbuffer, detlen))
+    {
+      return -newoffset;
+    }
+
+    /* Increment records written counter */
+    if (mssinfo->iostats)
+    {
+      mssinfo->scanrecordswritten++;
+    }
+
+    /* Sleep for specified throttle interval */
+    if (mssinfo->throttlensec)
+    {
+      nanosleep (&treq, &trem);
     }
 
     reccnt++;
@@ -793,8 +821,7 @@ ProcessFile (MSScanInfo *mssinfo, char *filename, FileNode *fnode,
 
   if (reccnt)
   {
-    lprintf (2, "[MSeedScan] Read %d %d-byte record(s) from %s",
-             reccnt, MSSCAN_RECSIZE, filename);
+    lprintf (2, "[MSeedScan] Read %d record(s) from %s", reccnt, filename);
   }
 
   return newoffset;
@@ -1035,7 +1062,7 @@ WriteRecord (MSScanInfo *mssinfo, char *record, int reclen)
 /***************************************************************************
  * Initialize:
  *
- * Process the command line parameters.
+ * Compile regex'es, allocate buffers, and recover state.
  *
  * Returns 0 on success, and -1 on failure
  ***************************************************************************/
@@ -1083,6 +1110,14 @@ Initialize (MSScanInfo *mssinfo)
       lprintf (0, "[MSeedScan] Error with pcre_study: %s (%s)", errptr, mssinfo->rejectstr);
       return -1;
     }
+  }
+
+  /* Calculate maximum allowed record length and allocate file read buffer */
+  mssinfo->readbuffersize = mssinfo->ringparams->pktsize - sizeof (RingPacket);
+  if ((mssinfo->readbuffer = (char *)malloc (mssinfo->readbuffersize)) == NULL)
+  {
+    lprintf (0, "[MSeedScan] Cannot allocate file read buffer");
+    return -1;
   }
 
   /* Attempt to recover sequence numbers from state file */

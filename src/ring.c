@@ -23,24 +23,22 @@
  * In general, non-existent packets are represented with a packet ID
  * of 0 and an offset of -1.
  *
- * Copyright 2016 Chad Trabant, IRIS Data Management Center
+ * This file is part of the ringserver.
  *
- * This file is part of ringserver.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * ringserver is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published
- * by the Free Software Foundation, either version 3 of the License,
- * or (at your option) any later version.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * ringserver is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
- * You should have received a copy of the GNU General Public License
- * along with ringserver. If not, see http://www.gnu.org/licenses/.
- *
- * Modified: 2017.051
+ * Copyright (C) 2020:
+ * @author Chad Trabant, IRIS Data Management Center
  **************************************************************************/
 
 #include <errno.h>
@@ -140,7 +138,7 @@ RingInitialize (char *ringfilename, char *streamfilename, uint64_t ringsize,
   /* Sanity check that the ring can hold at least two packets */
   if (ringsize < (headersize + 2 * pktsize))
   {
-    lprintf (0, "RingInitialize(): ring size (%llu) must be enough for 2 packets (%u each) and header (%d)",
+    lprintf (0, "RingInitialize(): ring size (%" PRIu64 ") must be enough for 2 packets (%u each) and header (%d)",
              ringsize, pktsize, headersize);
     return -2;
   }
@@ -151,7 +149,7 @@ RingInitialize (char *ringfilename, char *streamfilename, uint64_t ringsize,
   /* Sanity check that the maximum packet ID is greater than the maximum number of packets */
   if (maxpktid < maxpackets)
   {
-    lprintf (0, "RingInitialize(): maximum pkt id (%lld) must be >= maximum packets (%lld)",
+    lprintf (0, "RingInitialize(): maximum pkt id (%" PRId64 ") must be >= maximum packets (%" PRId64 ")",
              maxpktid, maxpackets);
     return -2;
   }
@@ -237,7 +235,7 @@ RingInitialize (char *ringfilename, char *streamfilename, uint64_t ringsize,
     /* Allocate ring packet buffer */
     if (!(*ringparams = malloc (ringsize)))
     {
-      lprintf (0, "RingInitialize(): error allocating %d bytes for ring packet buffer",
+      lprintf (0, "RingInitialize(): error allocating %" PRId64 " bytes for ring packet buffer",
                ringsize);
       return -2;
     }
@@ -315,15 +313,15 @@ RingInitialize (char *ringfilename, char *streamfilename, uint64_t ringsize,
       if ((*ringparams)->version != RING_VERSION)
         lprintf (0, "** Packet buffer version change: %d -> %d", (*ringparams)->version, RING_VERSION);
       if ((*ringparams)->ringsize != ringsize)
-        lprintf (0, "** Packet buffer size change: %llu -> %llu", (*ringparams)->ringsize, ringsize);
+        lprintf (0, "** Packet buffer size change: %" PRIu64 " -> %" PRIu64, (*ringparams)->ringsize, ringsize);
       if ((*ringparams)->pktsize != pktsize)
         lprintf (0, "** Packet size change: %u -> %u", (*ringparams)->pktsize, pktsize);
       if ((*ringparams)->maxpktid != maxpktid)
-        lprintf (0, "** Maximum packet ID change: %lld -> %lld", (*ringparams)->maxpktid, maxpktid);
+        lprintf (0, "** Maximum packet ID change: %" PRId64 " -> %" PRId64, (*ringparams)->maxpktid, maxpktid);
       if ((*ringparams)->maxpackets != maxpackets)
-        lprintf (0, "** Maximum packets change: %lld -> %lld", (*ringparams)->maxpackets, maxpackets);
+        lprintf (0, "** Maximum packets change: %" PRId64 " -> %" PRId64, (*ringparams)->maxpackets, maxpackets);
       if ((*ringparams)->maxoffset != maxoffset)
-        lprintf (0, "** Maximum offset change: %lld -> %lld", (*ringparams)->maxoffset, maxoffset);
+        lprintf (0, "** Maximum offset change: %" PRId64 " -> %" PRId64, (*ringparams)->maxoffset, maxoffset);
       if ((*ringparams)->headersize != headersize)
         lprintf (0, "** Header size change: %u -> %u", (*ringparams)->headersize, headersize);
     }
@@ -473,13 +471,13 @@ RingInitialize (char *ringfilename, char *streamfilename, uint64_t ringsize,
     return -1;
   }
 
-  lprintf (0, "Ring initialized, ringsize: %llu, pktsize: %u (%u)",
+  lprintf (0, "Ring initialized, ringsize: %" PRIu64 ", pktsize: %u (%lu)",
            ringsize, pktsize, (pktsize - sizeof (RingPacket)));
 
   /* Log the critical ring parameters if verbose enough */
-  lprintf (2, "   maxpackets: %lld, maxpktid: %lld", maxpackets, maxpktid);
-  lprintf (2, "   maxoffset: %lld, headersize: %u", maxoffset, headersize);
-  lprintf (2, "   earliest packet ID: %lld, offset: %lld",
+  lprintf (2, "   maxpackets: %" PRId64 ", maxpktid: %" PRId64, maxpackets, maxpktid);
+  lprintf (2, "   maxoffset: %" PRId64 ", headersize: %u", maxoffset, headersize);
+  lprintf (2, "   earliest packet ID: %" PRId64 ", offset: %" PRId64,
            (*ringparams)->earliestid, (*ringparams)->earliestoffset);
   ms_hptime2mdtimestr ((*ringparams)->earliestptime, timestr, 1);
   lprintf (2, "   earliest packet creation time: %s",
@@ -487,7 +485,7 @@ RingInitialize (char *ringfilename, char *streamfilename, uint64_t ringsize,
   ms_hptime2mdtimestr ((*ringparams)->earliestdstime, timestr, 1);
   lprintf (2, "   earliest packet data start time: %s",
            ((*ringparams)->earliestdstime == HPTERROR) ? "NONE" : timestr);
-  lprintf (2, "   latest packet ID: %lld, offset: %lld",
+  lprintf (2, "   latest packet ID: %" PRId64 ", offset: %" PRId64,
            (*ringparams)->latestid, (*ringparams)->latestoffset);
   ms_hptime2mdtimestr ((*ringparams)->latestptime, timestr, 1);
   lprintf (2, "   latest packet creation time: %s",
@@ -690,7 +688,7 @@ RingWrite (RingParams *ringparams, RingPacket *packet,
   /* Check packet size */
   if ((sizeof (RingPacket) + datasize) > ringparams->pktsize)
   {
-    lprintf (0, "RingWrite(): %s packet size too large (%d), maximum is %d bytes",
+    lprintf (0, "RingWrite(): %s packet size too large (%lu), maximum is %d bytes",
              packet->streamid, (sizeof (RingPacket) + datasize), ringparams->pktsize);
     return -1;
   }
@@ -758,7 +756,7 @@ RingWrite (RingParams *ringparams, RingPacket *packet,
 
       if (!(nextInRing = GetPacket (ringparams, nextid, 0)))
       {
-        lprintf (0, "RingWrite(): Error getting next earliest ID: %lld, current earliest: %lld",
+        lprintf (0, "RingWrite(): Error getting next earliest ID: %" PRId64 ", current earliest: %" PRId64,
                  nextid, earliest->pktid);
         ringparams->corruptflag = 1;
         ringparams->fluxflag = 0;
@@ -786,7 +784,7 @@ RingWrite (RingParams *ringparams, RingPacket *packet,
         return -2;
       }
 
-      lprintf (3, "Removing packet for stream %s (id: %lld)",
+      lprintf (3, "Removing packet for stream %s (id: %" PRId64 ")",
                earliest->streamid, earliest->pktid);
 
       /* Update RingParams with new earliest entry */
@@ -851,7 +849,7 @@ RingWrite (RingParams *ringparams, RingPacket *packet,
       ringparams->streamcount++;
     }
 
-    lprintf (2, "Added stream entry for %s (key: %lld)", packet->streamid, *skey);
+    lprintf (2, "Added stream entry for %s (key: %" PRId64 ")", packet->streamid, *skey);
   }
 
   /* Copy packet header into ring */
@@ -882,7 +880,7 @@ RingWrite (RingParams *ringparams, RingPacket *packet,
   {
     if (!(prevlatest = GetPacket (ringparams, stream->latestid, 0)))
     {
-      lprintf (0, "RingWrite(): Error getting next packet in stream (id: %lld)", stream->latestid);
+      lprintf (0, "RingWrite(): Error getting next packet in stream (id: %" PRId64 ")", stream->latestid);
       ringparams->corruptflag = 1;
       ringparams->fluxflag = 0;
       pthread_mutex_unlock (ringparams->writelock);
@@ -906,7 +904,7 @@ RingWrite (RingParams *ringparams, RingPacket *packet,
   pthread_mutex_unlock (ringparams->writelock);
   pthread_mutex_unlock (ringparams->streamlock);
 
-  lprintf (3, "Added packet for stream %s, pktid: %lld, offset: %lld",
+  lprintf (3, "Added packet for stream %s, pktid: %" PRId64 ", offset: %" PRId64,
            packet->streamid, packet->pktid, packet->offset);
 
   return 0;
@@ -955,7 +953,7 @@ RingRead (RingReader *reader, int64_t reqid,
   }
   else if (reqid < 0)
   {
-    lprintf (0, "RingRead(): unsupported position value: %lld", reqid);
+    lprintf (0, "RingRead(): unsupported position value: %" PRId64, reqid);
     return -1;
   }
   else
@@ -1091,8 +1089,7 @@ RingReadNext (RingReader *reader, RingPacket *packet, char *packetdata)
     }
     else
     {
-      lprintf (0, "RingReadNext(): unsupported position value: %lld",
-               reader->pktid);
+      lprintf (0, "RingReadNext(): unsupported position value: %" PRId64, reader->pktid);
       return -1;
     }
   }
@@ -1259,7 +1256,7 @@ RingPosition (RingReader *reader, int64_t pktid, hptime_t pkttime)
   }
   else if (pktid < 0)
   {
-    lprintf (0, "RingPosition(): unsupported position value: %lld", pktid);
+    lprintf (0, "RingPosition(): unsupported position value: %" PRId64, pktid);
     return -1;
   }
 
@@ -1611,7 +1608,7 @@ RingLimit (RingReader *reader, char *pattern)
   /* Compile pattern and assign to reader */
   if (pattern)
   {
-    /* Free existing complied expression */
+    /* Free existing compiled expression */
     if (reader->limit)
       pcre_free (reader->limit);
 
@@ -1955,9 +1952,9 @@ GetPacket (RingParams *ringparams, int64_t pktid, hptime_t *pkttime)
   /* Sanity check the offset value */
   if (offset < 0 || offset > ringparams->maxoffset)
   {
-    lprintf (0, "GetPacket() determined an impossible offset: %lld for pktid: %lld",
+    lprintf (0, "GetPacket() determined an impossible offset: %" PRId64 " for pktid: %" PRId64,
              offset, pktid);
-    lprintf (0, "            upktid: %lld, ulatestid: %lld, latestoffset: %lld",
+    lprintf (0, "            upktid: %" PRId64 ", ulatestid: %" PRId64 ", latestoffset: %" PRId64,
              upktid, ulatestid, latestoffset);
     return 0;
   }

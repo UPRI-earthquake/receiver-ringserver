@@ -3,24 +3,22 @@
  *
  * General client thread definition and common utility functions
  *
- * Copyright 2016 Chad Trabant, IRIS Data Managment Center
+ * This file is part of the ringserver.
  *
- * This file is part of ringserver.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * ringserver is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published
- * by the Free Software Foundation, either version 3 of the License,
- * or (at your option) any later version.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * ringserver is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
- * You should have received a copy of the GNU General Public License
- * along with ringserver. If not, see http://www.gnu.org/licenses/.
- *
- * Modified: 2018.054
+ * Copyright (C) 2020:
+ * @author Chad Trabant, IRIS Data Management Center
  **************************************************************************/
 
 #include <errno.h>
@@ -79,8 +77,8 @@ ClientThread (void *arg)
   ssize_t nrecv;
   int nread;
 
-  struct sockaddr_in sin;
-  socklen_t sinlen = sizeof (struct sockaddr_in);
+  struct sockaddr_storage saddr = {0};
+  socklen_t saddrlen = sizeof(saddr);
   int serverport = -1;
 
   /* Throttle related */
@@ -132,9 +130,12 @@ ClientThread (void *arg)
   }
 
   /* Find the server port used for this connection */
-  if (getsockname (cinfo->socket, (struct sockaddr *)&sin, &sinlen) == 0)
+  if (getsockname (cinfo->socket, (struct sockaddr *)&saddr, &saddrlen) == 0)
   {
-    serverport = ntohs (sin.sin_port);
+    if (saddr.ss_family == AF_INET)
+      serverport = ntohs (((struct sockaddr_in *)&saddr)->sin_port);
+    else
+      serverport = ntohs (((struct sockaddr_in6 *)&saddr)->sin6_port);
   }
 
   lprintf (1, "Client connected [%d]: %s [%s] port %s",
@@ -1130,15 +1131,27 @@ RecvLine (ClientInfo *cinfo)
  * Generate a string containing the names of the protocols specified
  * by the protocols flag.
  *
- * Return length of string in protocolstr on success or NULL for error.
+ * Return length of string in protocolstr on success or 0 for error.
  ***************************************************************************/
 int
 GenProtocolString (uint8_t protocols, char *protocolstr, size_t maxlength)
 {
   int length;
+  char *family;
+
+  if (!protocolstr)
+    return 0;
+
+  if (protocols & FAMILY_IPv4)
+    family = "IPv4";
+  else if (protocols & FAMILY_IPv6)
+    family = "IPv6";
+  else
+    family = "Unknown family?";
 
   length = snprintf (protocolstr, maxlength,
-                     "%s%s%s",
+                     "%s: %s%s%s",
+                     family,
                      (protocols & PROTO_DATALINK) ? "DataLink " : "",
                      (protocols & PROTO_SEEDLINK) ? "SeedLink " : "",
                      (protocols & PROTO_HTTP) ? "HTTP " : "");
@@ -1194,7 +1207,8 @@ GetStreamNode (RBTree *tree, pthread_mutex_t *plock, char *streamid, int *new)
     }
 
     /* Initialize the new StreamNode */
-    strncpy (stream->streamid, streamid, sizeof (stream->streamid));
+    strncpy (stream->streamid, streamid, sizeof (stream->streamid) - 1);
+    *(stream->streamid + sizeof(stream->streamid) - 1) = '\0';
     stream->txpackets = 0;
     stream->txbytes = 0;
     stream->rxpackets = 0;

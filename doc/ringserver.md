@@ -93,14 +93,6 @@ ringserver [options] [configfile]
 
 <p style="padding-left: 30px;">Network port to listen for incoming connections on.  By default the server will not listen for connections, setting at least one listen port is needed to communicate with the server.  By default, a listening port will accept all supported protocols.  Restricting a port to only allow specific protocols can be done using a configuration file, see <b>Multi-protocol Support</b> for more information.</p>
 
-<b>-DL </b><i>port</i>
-
-<p style="padding-left: 30px;">Network port to listen for DataLink connections on.  This is a special case listening port limited to DataLink.</p>
-
-<b>-SL </b><i>port</i>
-
-<p style="padding-left: 30px;">Network port to listen for SeedLink connections on.  This is a special case listening port limited to SeedLink.</p>
-
 <b>-T </b><i>logdir</i>
 
 <p style="padding-left: 30px;">Transfer log file base directory, by default the server does not write transfer logs.  If a directory is specified both transmission and reception logs will be written, these two logs can be toggled individually in the server config file.</p>
@@ -147,17 +139,19 @@ ringserver [options] [configfile]
 
 ## <a id='access-control'>Access Control</a>
 
-<p >By default all clients are allowed to connect.  Specific clients can be rejected using the <b>RejectIP</b> config parameter.  If any <b>MatchIP</b> config parameters are specified only addresses that match one of the entries and are not rejected are allowed to connect.</p>
+<p >By default all clients are allowed to connect.  Specific clients can be rejected using the <b>RejectIP</b> config parameter.  If any <b>MatchIP</b> config parameters are specified only addresses that match one of the entries, and are not rejected, are allowed to connect.</p>
 
-<p >By default all clients are allowed access to all streams in the buffer.  Specific clients can be limited to subsets of streams using the <b>LimitIP</b> config parameter.  This parameter takes a regular expression that is used to match stream IDs that the client(s) are allowed access to.</p>
+<p >By default all clients are allowed access to all streams in the buffer, and clients with write permission are allowed to write any streams.  Specific clients can be limited to access or write subsets of streams using the <b>LimitIP</b> config parameter.  This parameter takes a regular expression that is used to match stream IDs that the client(s) are allowed access to or to write.</p>
 
 <p >By default all clients are allowed to request the server ID, simple status and list of streams.  Specific clients can be allowed to access connection information and more detailed status using the <b>TrustedIP</b> config parameter.</p>
 
-<p >If no client addresses are granted write permission via <b>WriteIP</b> then the address 127.0.0.1 (local loopback) is granted write permission.</p>
+<p >If no client addresses are granted write permission via <b>WriteIP</b> or granted trusted status via <b>TrustedIP</b> then the 'localhost' address (local loopback) are granted those permissions.</p>
+
+<p >Access control is host range (network) based, and specified as an address followed by an optional prefix in CIDR notation.  For example: "192.168.0.1/24" specifies the range of addresses from 192.168.0.1 to 192.168.0.254.  The address may be a hostname, which will be resolved on startup.  The prefix is optional and, if omitted, defaults to specifying only the single address.</p>
 
 ## <a id='seedlink-support'>Seedlink Support</a>
 
-<p >The SeedLink protocol only transmits 512-byte miniSEED data records. Therefore only 512-byte miniSEED packets with a '/MSEED' suffix on the stream ID will be exported via SeedLink if enabled.</p>
+<p >The legacy SeedLink protocol only transmits 512-byte miniSEED data records.  This server is able to transmit miniSEED records of any length via SeedLink.  To ensure compatitiblity with legacy clients, only 512-byte miniSEED records should be inserted into the ring buffer.</p>
 
 <p >This server supports the wildcarding of network and station codes during SeedLink negotiation using the '?' and '*' characters for single or multiple character matches respectively.  Not all SeedLink clients support wildcarded network and station codes.</p>
 
@@ -166,6 +160,8 @@ ringserver [options] [configfile]
 <p >Network listening ports can respond to all supported protocols (SeedLink, DataLink and HTTP).  The first command received by the server is used to determine which protocol is being used by the client, all subsequent communication is expected in this protocol.</p>
 
 <p >The protocols allowed by any given listening port can be set to any combination of the supported protocols by adding flags to the <i>Listen</i> parameter of the server configuration file.</p>
+
+<p >Both IPv4 and IPv6 are supported by default (if supported by the system). The server can be limited to a specified network protocol family by adding flags to the <i>Listen</i> parameter of the server configuration file.</p>
 
 ## <a id='http-support'>Http Support</a>
 
@@ -291,7 +287,7 @@ END CLIENT host.iris.edu [192.168.255.255] total TX bytes: 4608
 
 ## <a id='miniseed-scanning'>Miniseed Scanning</a>
 
-<p >Using either the <b>-MSSCAN</b> command line option or the <b>MSeedScan</b> config file parameter the server can be configured to recursively scan a directory for files containing miniSEED data records and insert them into the ring.  Intended for real-time data re-distribution files are continuously scanned, newly added records are inserted into the ring.</p>
+<p >Using either the <b>-MSSCAN</b> command line option or the <b>MSeedScan</b> config file parameter the server can be configured to recursively scan a directory for files containing miniSEED data records and insert them into the ring.  Intended for real-time data re-distribution, files are continuously scanned, newly added records are inserted into the ring.</p>
 
 <p >Sub-options can be used to control the scanning process.  The sub-options are specified on the same line as the scan directory as key-value pairs separated by an equals '=' character and may not contain spaces (because they are separated by spaces).  Do not use quotes for the values.  The available sub-options are:</p>
 
@@ -331,4 +327,4 @@ IRIS Data Management Center
 </pre>
 
 
-(man page 2019/02/14)
+(man page 2020/03/08)

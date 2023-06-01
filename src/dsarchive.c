@@ -9,24 +9,22 @@
  * file.  The definition of the groups is implied by the format of the
  * archive.
  *
- * Copyright 2016 Chad Trabant, IRIS Data Management Center
+ * This file is part of the ringserver.
  *
- * This file is part of ringserver.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * ringserver is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published
- * by the Free Software Foundation, either version 3 of the License,
- * or (at your option) any later version.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * ringserver is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
- * You should have received a copy of the GNU General Public License
- * along with ringserver. If not, see http://www.gnu.org/licenses/.
- *
- * modified: 2016.345
+ * Copyright (C) 2020:
+ * @author Chad Trabant, IRIS Data Management Center
  ***************************************************************************/
 
 #include <errno.h>
@@ -85,7 +83,7 @@ ds_streamproc (DataStream *datastream, MSRecord *msr, char *postpath,
   struct tm ctm;
   time_t curtime;
   char *tptr;
-  char tstr[20];
+  char tstr[32];
   char filename[MAX_FILENAME_LEN];
   char definition[MAX_FILENAME_LEN];
   char pathformat[MAX_FILENAME_LEN];
@@ -508,7 +506,7 @@ ds_streamproc (DataStream *datastream, MSRecord *msr, char *postpath,
       {
         if (errno == ENOENT)
         {
-          lprintf (2, "Creating directory: %s", hostname, filename);
+          lprintf (2, "[%s] Creating directory: %s", hostname, filename);
           if (mkdir (filename, S_IRWXU | S_IRWXG | S_IRWXO)) /* Mode 0777 */
           {
             lprintf (0, "[%s] ds_streamproc: mkdir(%s) %s",
@@ -747,7 +745,7 @@ ds_getstream (DataStream *datastream, const char *defkey, char *filename,
     else if (rval == 0 && pglob.gl_pathc > 0)
     {
       if (pglob.gl_pathc > 1)
-        lprintf (3, "[%s] Found %d files matching %s, using last match",
+        lprintf (3, "[%s] Found %lu files matching %s, using last match",
                  ident, pglob.gl_pathc, globmatch);
 
       matchedfilename = pglob.gl_pathv[pglob.gl_pathc - 1];
@@ -766,18 +764,19 @@ ds_getstream (DataStream *datastream, const char *defkey, char *filename,
   if (foundgroup == NULL)
   {
     if (matchedfilename)
-      lprintf (2, "Resurrecting data stream entry for key %s", ident, defkey);
+      lprintf (2, "[%s] Resurrecting data stream entry for key %s", ident, defkey);
     else
-      lprintf (2, "Creating data stream entry for key %s", ident, defkey);
+      lprintf (2, "[%s] Creating data stream entry for key %s", ident, defkey);
 
     foundgroup = (DataStreamGroup *)malloc (sizeof (DataStreamGroup));
 
+    memset (foundgroup, 0, sizeof (DataStreamGroup));
     foundgroup->defkey = strdup (defkey);
     foundgroup->filed = 0;
     foundgroup->modtime = curtime;
     strncpy (foundgroup->filename, filename, sizeof (foundgroup->filename));
     if (postpath)
-      strncpy (foundgroup->postpath, postpath, sizeof (foundgroup->postpath));
+      strncpy (foundgroup->postpath, postpath, sizeof (foundgroup->postpath) - 1);
     else
       foundgroup->postpath[0] = '\0';
     foundgroup->next = NULL;
@@ -888,7 +887,7 @@ ds_openfile (DataStream *datastream, const char *filename, char *ident)
         else
           rlim.rlim_cur = datastream->maxopenfiles;
 
-        lprintf (3, "[%s] Setting open file limit to %lld",
+        lprintf (3, "[%s] Setting open file limit to %" PRId64,
                  ident, (int64_t)rlim.rlim_cur);
 
         if (setrlimit (RLIMIT_NOFILE, &rlim) == -1)
