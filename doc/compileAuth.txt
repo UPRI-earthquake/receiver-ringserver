@@ -20,18 +20,26 @@ sudo apt-get install libjwt-dev libjansson-dev
 #cd jansson-2.12
 #./configure
 #make
-### libjwt  (or maybe use apt-get installed version?)
-#cd libjwt-1.10.1
-#autoreconf -i
-#./configure
-#make
-### to git rid of:
-# ./configure: line 11997: syntax error near unexpected token `OPENSSL,'
-# ./configure: line 11997: `	PKG_CHECK_MODULES(OPENSSL, openssl >= 0.9.8)'
-# apt-get install pkg-config
-#then run
-# autoreconf -i
+# sudo make install (to install into /usr/local)
+
+### libjwt (note this is version 1.15.3 NOT 1.10.1)
+# wget https://github.com/benmcollins/libjwt/releases/download/v1.15.3/libjwt-1.15.3.tar.gz
+# tar xzf libjwt-1.15.3.tar.gz
+# cd libjwt-1.15.3
+# autoreconf -i (might need to install autoreconf)
+# make sure that the jansson dependency of libjwt is discoverable by running the following command
+# where you should edit the path to indicate where "jansson.pc" file is located
+# export PKG_CONFIG_PATH="/home/sysop/Development/receiver-ringserver/jansson-2.12:$PKG_CONFIG_PATH"
 # ./configure
+# make
+# sudo make install
+
+# to ensure that the build and install process was correct
+# ls /usr/local/include should output jansson.h and jwt.h
+
+# before running ./ringserver, we may need to update the LD_LIBRARY_PATH to include the directory of the new dependency libraries
+# export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
+# you may want to put that in your bashrc
 
 # libcurl (required by https request)
 1. download from github release into dir: https://github.com/curl/curl/releases/tag/curl-8_1_1
