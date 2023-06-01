@@ -1,0 +1,13 @@
+.gitignore
+jansson-*
+libjwt-*
+pcre
+mxml
+*.o
+ringserver
+libmseed/libmseed.a
+ring
+auth
+.cache
+compile_commands.json
+*.swp

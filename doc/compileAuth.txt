@@ -1,0 +1,63 @@
+
+git clone https://github.com/crotwell/ringserver.git
+
+# compiling with authorization, on authorization branch
+git checkout authorization
+
+# requires libjwt, for json web token support,
+# which requires jannson, for json support
+
+sudo apt-get install git  build-essential make autoconf libtool libssl-dev pkg-config libjwt-dev
+
+sudo apt-get install libjwt-dev libjansson-dev
+
+# ....or
+#
+#put jansson-2.12 ,maybe also  libjwt-1.10.1 , in ringserver dir
+# wget http://www.digip.org/jansson/releases/jansson-2.12.tar.gz
+#tar zxf jansson-2.12.tar.gz
+### jansson
+#cd jansson-2.12
+#./configure
+#make
+# sudo make install (to install into /usr/local)
+
+### libjwt (note this is version 1.15.3 NOT 1.10.1)
+# wget https://github.com/benmcollins/libjwt/releases/download/v1.15.3/libjwt-1.15.3.tar.gz
+# tar xzf libjwt-1.15.3.tar.gz
+# cd libjwt-1.15.3
+# autoreconf -i (might need to install autoreconf)
+# ./configure
+# make
+# sudo make install
+
+# to ensure that the build and install process was correct
+# ls /usr/local/include should output jansson.h and jwt.h
+
+# before running ./ringserver, we may need to update the LD_LIBRARY_PATH to include the directory of the new dependency libraries
+# export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
+# you may want to put that in your bashrc
+
+# libcurl (required by https request)
+1. download from github release into dir: https://github.com/curl/curl/releases/tag/curl-8_1_1
+    1. wget https://github.com/curl/curl/archive/refs/tags/curl-8_1_1.tar.gz
+    2. tar xzf curl-8_1_1.tar.gz
+2. Build curl, follow: https://github.com/curl/curl/blob/master/GIT-INFO
+	1. autoreconf -fi (might require to install libtool and autoconf)
+    2. ./configure --with-openssl
+	3. make
+	4. sudo make install
+3. Check that it's installed via: ls /usr/local/include which should show curl
+
+
+# to test:
+edit ringserver conf file add
+AuthDir your/auth/directory
+which should contain your secret as
+secret.key, paste your brgy token here (from AuthServer)
+also add AuthServer link in config file for example: AuthServer http://172.22.0.3:5000/accounts/verifySensorToken
+./ringserver -vv ./doc/ring.conf
+
+#use slink2dali with auth option:
+TOKEN=paste_citizen_token
+./slink2dali -vvv -a $TOKEN -S GE_TOLI2 geofon.gfz-potsdam.de:18000 localhost:18000

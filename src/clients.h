@@ -29,6 +29,8 @@ extern "C" {
 #include <pthread.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <openssl/ssl.h>
+#include <jwt.h>
 
 #include "ring.h"
 #include "rbtree.h"
@@ -71,7 +73,7 @@ typedef struct ClientInfo_s {
     uint8_t four[4];
   } wsmask;                 /* Masking key for WebSocket message */
   size_t      wsmaskidx;    /* Index for unmasking WebSocket message */
-  uint8_t     writeperm;    /* Write permission flag */
+  uint8_t     writeperm;    /* Flag for whether IP is listed on WriteIP config*/
   uint8_t     trusted;      /* Trusted client flag */
   float       timewinlimit; /* Time window ring search limit in percent */
   RingParams *ringparams;   /* Ring buffer parameters */
@@ -100,6 +102,16 @@ typedef struct ClientInfo_s {
   double      rxbyterate;   /* Track rate of data byte reception */
   hptime_t    ratetime;     /* Time stamp for TX and RX rate calculations */
   void       *extinfo;      /* Extended client info, protocol specific */
+  // TODO: delete these?
+  jwt_t      *jwttoken;     /* JWT token for WRITE auth */
+  const char *writepatternstr; /* WRITE match as string */
+  pcre       *writepattern; /* Array of auth-to-write-streamId regexes from JWT token */
+  // end of TODO
+  uint8_t    authorized;    /* Flag for authority to write, ie passed AUTHORIZATION command*/
+  int        tokenExpiry;   /* Token expiration in seconds since epoch */
+  pcre       **writepatterns; /* Array of auth-to-write-streamId regexes compiled from JWT token */
+  char       **writepatterns_str; /* Array of auth-to-write-streamId regexes compiled from JWT token */
+  int        writepattern_count; /* Number of elements in the writepatterns array */
 } ClientInfo;
 
 /* Structure used as the data for B-tree of stream tracking */

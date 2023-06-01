@@ -238,6 +238,12 @@ ClientThread (void *arg)
     mytdp->td_flags = TDF_ACTIVE;
   pthread_mutex_unlock (&(mytdp->td_lock));
 
+  /* Initialize AUTHORIZATION variables to false and empty */
+  cinfo->authorized = 0;
+  cinfo->tokenExpiry = 0;
+  cinfo->writepatterns = NULL;
+  cinfo->writepatterns_str = NULL;
+
   /* Main client loop, delegating processing and data flow */
   while (mytdp->td_flags != TDF_CLOSE)
   {
@@ -428,6 +434,30 @@ ClientThread (void *arg)
     pcre_free (cinfo->reader->reject);
   if (cinfo->reader->reject_extra)
     pcre_free (cinfo->reader->reject_extra);
+  if (cinfo->jwttoken){
+    jwt_free (cinfo->jwttoken);
+  }
+  if (cinfo->writepattern)
+    pcre_free (cinfo->writepattern);
+
+  /* Release AUHORIZATION variables */
+  if (cinfo->authorized){
+    cinfo->authorized = 0;
+    cinfo->tokenExpiry = 0;
+  }
+  if (cinfo->writepatterns){
+    for(int i=0; i < cinfo->writepattern_count; i++){
+      pcre_free (cinfo->writepatterns[i]); // free each pattern in array
+    }
+    free(cinfo->writepatterns); // free pointer to arry
+  }
+  if (cinfo->writepatterns_str){
+    for(int i=0; i < cinfo->writepattern_count; i++){
+      free (cinfo->writepatterns_str[i]); // free each string in array
+    }
+    free (cinfo->writepatterns_str); // free via pointer to array block
+  }
+
 
   /* Release stream tracking binary tree */
   pthread_mutex_lock (&(cinfo->streams_lock));
@@ -445,8 +475,9 @@ ClientThread (void *arg)
     free (cinfo->packetdata);
 
   /* Release client socket structure */
-  if (cinfo->addr)
+  if (cinfo->addr){
     free (cinfo->addr);
+  }
 
   /* Shutdown and release miniSEED write data stream */
   if (cinfo->mswrite)

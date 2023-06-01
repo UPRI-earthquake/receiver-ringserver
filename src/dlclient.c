@@ -21,6 +21,9 @@
  * @author Chad Trabant, IRIS Data Management Center
  **************************************************************************/
 
+ /* _GNU_SOURCE needed to get asprintf() under Linux */
+ #define _GNU_SOURCE
+
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
@@ -28,11 +31,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
+#include <curl/curl.h>
 
 #include <libmseed.h>
 #include <mxml.h>
+#include <jansson.h>
 
 #include "clients.h"
 #include "dlclient.h"
@@ -43,6 +49,7 @@
 #include "rbtree.h"
 #include "ring.h"
 #include "ringserver.h"
+#include "response_codes.h"
 
 /* Define the number of no-action loops that trigger the throttle */
 #define THROTTLE_TRIGGER 10
@@ -55,6 +62,119 @@ static int SendPacket (ClientInfo *cinfo, char *header, char *data,
                        int64_t value, int addvalue, int addsize);
 static int SendRingPacket (ClientInfo *cinfo);
 static int SelectedStreams (RingParams *ringparams, RingReader *reader);
+
+// helper functions and structs
+// Structure to hold the response received from the authentication server
+struct MemoryStruct {
+  char *memory;
+  size_t size;
+};
+static int requestTokenVerification(char *authserver, char *bearertoken, char *jwt_str, struct MemoryStruct *resp);
+
+/***********************************************************************
+ * WriteMemoryCallback:
+ *
+ * Callback function for CURLOPT_WRITEFUNCTION. Writes received content
+ * into user-defined data userp.
+ *
+ * Returns zero on success, negative value on error.  On success the
+ * JSON response is written in resp.
+ ***********************************************************************/
+size_t WriteMemoryCallback(void *receivedContents, size_t size, size_t nmemb, void *userp) {
+  struct MemoryStruct *userStorage = (struct MemoryStruct *)userp; // recast to correct type
+  size_t realsize = size * nmemb;
+
+  // allocate memory with correct size, +1 for null terminator
+  char *ptr = realloc(userStorage->memory, userStorage->size + realsize + 1);
+  if (ptr == NULL) {
+    /* Out of memory! */
+    printf("Not enough memory (realloc returned NULL)\n");
+    return 0;
+  }
+
+  userStorage->memory = ptr; // assign to allocated memory
+  // copy receivedContents to userStorage, starting on its current size (may be zero)
+  memcpy(&(userStorage->memory[userStorage->size]), receivedContents, realsize);
+  userStorage->size += realsize; // increment size with amount copied
+  userStorage->memory[userStorage->size] = '\0'; // add null terminator to be a valid C str
+
+  return realsize; // return number of bytes written
+}
+
+/***********************************************************************
+ * requestTokenVerification:
+ *
+ * Sends an HTTPS POST request to the authserver with the jwt_str as a
+ * payload to be verified, and bearertoken is for accessing the
+ * authserver endpoint (our own authorization token).
+ *
+ * Returns zero on success, negative value on error.  On success the
+ * JSON response is written in resp.memory as a string.
+ ***********************************************************************/
+
+int requestTokenVerification(char *authserver, char *bearertoken,
+                             char *jwt_str, struct MemoryStruct *resp) {
+  CURL *curl;
+  CURLcode res;
+  int ret = -1;
+
+  /* Initialize libcurl */
+  res = curl_global_init(CURL_GLOBAL_DEFAULT);
+
+  /* get a curl handle */
+  curl = curl_easy_init(); // single request
+
+  if (curl) {
+    // Set the target URL
+    curl_easy_setopt(curl, CURLOPT_URL, authserver);
+
+    // Set the request headers
+    struct curl_slist *headers = NULL;
+
+    size_t authHeaderSize = sizeof("Authorization: Bearer ") + strlen(bearertoken) + 1;
+    char* authHeader = (char*)malloc(authHeaderSize);
+    snprintf(authHeader, authHeaderSize, "Authorization: Bearer %s", bearertoken);
+
+    headers = curl_slist_append(headers, authHeader);
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+
+    // Set the callback function to parse the response
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)resp);
+
+    // Set the request payload
+    size_t jsonPayloadSize = strlen(jwt_str) + 14; // 13 additional characters for the JSON structure
+                                                   // plus 1 for null termination
+    char *jsonPayload = malloc(jsonPayloadSize);
+    if (jsonPayload == NULL) {
+      lprintf(0, "Error allocating memory for JSON payload\n");
+    }
+    snprintf(jsonPayload, jsonPayloadSize, "{\"token\": \"%s\"}", jwt_str);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, jsonPayload);
+
+    // Perform the POST request
+    res = curl_easy_perform(curl);
+    if (res != CURLE_OK) {
+      lprintf(0, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+    } else {
+      ret = 0;
+    }
+
+    // Clean up
+    free(authHeader);
+    free(jsonPayload);
+    curl_easy_cleanup(curl);
+    curl_slist_free_all(headers);
+  }
+
+  curl_global_cleanup();
+
+  return ret;
+}
+
+
 
 /***********************************************************************
  * DLHandleCmd:
@@ -75,11 +195,14 @@ DLHandleCmd (ClientInfo *cinfo)
   if (!strncmp (cinfo->recvbuf, "WRITE", 5))
   {
     /* Check for write permission */
-    if (!cinfo->writeperm)
+    /* NOTE: if client has writeperm (see conf WriteIP), then that overrides token requirement,
+     * meaning they may send even without AUTHORIZATION command
+     */
+    if (!cinfo->authorized)
     {
-      lprintf (1, "[%s] Data packet received from client without write permission",
+      lprintf (1, "[%s] WRITE_ERR: Data packet received from client without write permission",
                cinfo->hostname);
-      SendPacket (cinfo, "ERROR", "Write permission not granted, no soup for you!", 0, 1, 1);
+      SendPacket (cinfo, "ERROR", "WRITE_ERR: Write permission not granted, missing token", 0, 1, 1);
       return -1;
     }
     /* Any errors from HandleWrite are fatal */
@@ -225,7 +348,7 @@ DLStreamPackets (ClientInfo *cinfo)
 static int
 HandleNegotiation (ClientInfo *cinfo)
 {
-  char sendbuffer[255];
+  char sendbuffer[300];
   int size;
   int fields;
   int selected;
@@ -566,6 +689,360 @@ HandleNegotiation (ClientInfo *cinfo)
     }
   } /* End of REJECT */
 
+  /* AUTHORIZATION size\r\n[token] - token authorization for write */
+  else if (!strncasecmp (cinfo->recvbuf, "AUTHORIZATION", 13))
+  {
+    /* Parse size from request */
+    fields = sscanf (cinfo->recvbuf, "%*s %d %c", &size, &junk);
+
+    /* Make sure we got a single pattern or no pattern */
+    if (fields > 1)
+    {
+      if (SendPacket (cinfo, "ERROR", "AUTHORIZATION requires a single argument", 0, 1, 1)){
+        return -1;
+      } else {
+        return 0; // means negotiation completed (we've responded)
+      }
+    }
+
+    /* Check received token size */
+    if (size > DLMAXREGEXLEN)
+    {
+      lprintf (0, "[%s] AUTH_ERR: Authorization token too large (%)", cinfo->hostname, size);
+
+      snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_ERR: Authorization token too large, must be <= %d",
+                DLMAXREGEXLEN);
+      if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1)) {
+        return -1;
+      } else {
+        return 0;
+      }
+    }
+
+    /* Check if AuthServer is configured */
+    if ( ! authserver)
+    {
+      lprintf (0, "[%s] AUTH_ERR: Cannot authorize for write, AuthServer not configured", cinfo->hostname);
+
+      snprintf (sendbuffer, sizeof (sendbuffer),
+          "[%s] AUTH_ERR: cannot authorize for write, AuthServer not configured", cinfo->hostname);
+      if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1)) {
+        return -1;
+      } else {
+        return 0;
+      }
+    }
+
+    /* Check if BearerToken is configured */
+    if (! authdir)
+    {
+      lprintf (0, "[%s] AUTH_ERR: Cannot authorize for write, BearerToken not configured", cinfo->hostname);
+
+      snprintf (sendbuffer, sizeof (sendbuffer),
+          "[%s] AUTH_ERR: cannot authorize for write, BearerToken not configured", cinfo->hostname);
+      if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1)) {
+        return -1;
+      } else {
+        return 0;
+      }
+    }
+
+    /* Get bearertoken from authdir/secret.key */
+    char *keypath = NULL;
+    char *keyfilename = NULL;
+    struct stat filestat;
+    FILE *fp;
+    int key_len = 0;
+
+    // read key to verify
+    if (asprintf (&keypath, "%s/%s", authdir, "secret.key") < 0)
+      return -1;
+
+    keyfilename = realpath (keypath, NULL);
+    if (keyfilename == NULL)
+    {
+      lprintf (0, "[%s] Error resolving path to token file: %s", cinfo->hostname, keypath);
+      return -1;
+    }
+
+    // Get file attributes into filestat (NOTE: not used...)
+    if (stat (keyfilename, &filestat))
+      return -1;
+
+    // Open file
+    if ((fp = fopen (keyfilename, "r")) == NULL)
+    {
+      lprintf (0, "[%s] Error opening token file %s:  %s",
+               cinfo->hostname, keyfilename, strerror (errno));
+      return -1;
+    }
+
+    // Obtain the size of the file
+    fseek(fp, 0, SEEK_END);         // change cursor to 0 offset from end
+    long file_size = ftell(fp);     // get current position of file pointer
+    fseek(fp, 0, SEEK_SET);         // putback cursor to 0 offset from start
+    if (file_size > DLMAXREGEXLEN){
+      lprintf (0, "[%s] Token in authdir/secret.key is too large: %d",
+               cinfo->hostname, file_size);
+      return -1;
+    }
+
+    // Allocate memory
+    char *bearertoken = malloc(file_size + 1);
+    if (bearertoken == NULL) {
+      lprintf(0, "[%s] Failed to allocate memory for bearertoken", cinfo->hostname);
+      return -1;
+    }
+
+    // Read token from authdir/secret.key into bearertoken
+    key_len = fread(bearertoken, 1, file_size, fp);
+    if (key_len != file_size) {
+      lprintf(0, "[%s] Error reading bearertoken from authdir/secret.key", cinfo->hostname);
+      return -1;
+    }
+    fclose(fp);
+
+    // Terminate properly
+    bearertoken[key_len] = '\0';
+    if ((key_len > 0) && (bearertoken[key_len-1] == '\n')) {
+      bearertoken[key_len-1] = '\0'; //zap newline
+    }
+
+
+    /* Proceed to token verification */
+
+
+    /* Get client token from dali AUTHORIZATION command */
+    char *jwt_str = NULL;
+    struct MemoryStruct response;
+
+    if (cinfo->jwttoken){ // Erase any recently stored token for this connection
+      jwt_free( cinfo->jwttoken);
+    }
+
+    // Allocate memory for jwt holder
+    if (!(jwt_str = (char *)malloc (size + 1)))
+    {
+      lprintf (0, "[%s] Error allocating memory", cinfo->hostname);
+      return -1;
+    }
+
+    // Read token from AUTHORIZATION command data
+    if (RecvData (cinfo, jwt_str, size) < 0)
+    {
+      lprintf (0, "[%s] Error Recv'ing data", cinfo->hostname);
+      free(jwt_str);
+      return -1;
+    }
+
+    // Make sure buffer is a terminated string
+    jwt_str[size] = '\0';
+
+    // Ask AuthServer to verify token
+    response.memory = malloc(1); // Return a pointer to at least 1 block, will be resized dynamically
+    response.size = 0;
+
+    lprintf (1, "[%s] Requesting verification from %s", cinfo->hostname, authserver);
+    if (requestTokenVerification(authserver, bearertoken, jwt_str, &response))
+    {
+      lprintf (0, "[%s] Error requesting verification from %s", cinfo->hostname, authserver);
+      free(response.memory);
+      free(jwt_str);
+      return -1;
+    }
+    free(jwt_str); // no more need for this
+    free(bearertoken); // no more need for this
+
+    lprintf (1, "[%s] %s responded with: %s\n", cinfo->hostname, authserver, response.memory);
+
+    // Convert str response to object
+    json_error_t err;
+    json_t *jsonResponse = json_loads(response.memory, 0, &err);
+    free(response.memory); // no more need for this
+
+    // Check if parsing was successful
+    if (jsonResponse == NULL) {
+      lprintf(0, "[%s] JSON parsing error: on line %d: %s\n", err.line, err.text);
+      return -1;
+    }
+
+    int response_code = json_integer_value(json_object_get(jsonResponse, "status"));
+
+    int ret = 0;
+    if (response_code == INBEHALF_VERIFICATION_SUCCESS)
+    {
+      // Get JSON components
+      json_t *decodedSenderToken = json_object_get(jsonResponse, "decodedSenderToken");
+      json_t *exp_ptr = json_object_get(decodedSenderToken, "exp");
+      json_t *streamIdsArray = json_object_get(decodedSenderToken, "streamIds");
+
+      // Check expected data types
+      if (exp_ptr == NULL || ( !json_is_integer(exp_ptr) )) {
+        // TODO: Handle this correctly, response with "ERROR" ?
+        // TODO: Refactor this code (maybe write this into a function) to avoid too much
+        // freeing because of early return
+        lprintf(0, "Error parsing expiration from token");
+        json_decref(streamIdsArray);
+        json_decref(decodedSenderToken);
+        json_decref(jsonResponse);
+        return -1;
+      }
+
+      if (streamIdsArray == NULL || ( !json_is_array(streamIdsArray) )) {
+        // TODO: Handle this correctly, response with "ERROR" ?
+        lprintf(0, "Error parsing streamIds from token");
+        json_decref(exp_ptr);
+        json_decref(decodedSenderToken);
+        json_decref(jsonResponse);
+        return -1;
+      }
+
+      // Assign to cinfo
+      cinfo->tokenExpiry = json_integer_value(exp_ptr);
+      lprintf(1, "[%s] Token expiration: %d", cinfo->hostname, cinfo->tokenExpiry);
+      json_decref(exp_ptr); // no more need for this
+
+      // Iterate over the elements in the streamIds array
+      size_t index;
+      json_t *streamId;
+      const char *errptr;
+      int erroffset;
+
+      // Allocate size of arrays
+      cinfo->writepattern_count = 0;
+      size_t num_streams = json_array_size(streamIdsArray);
+      if (num_streams > DL_MAX_NUM_STREAMID){
+        lprintf(0, "Error number of streamIds (%zu) exceeded maximum: %d",
+            num_streams, DL_MAX_NUM_STREAMID);
+        json_decref(exp_ptr);
+        json_decref(decodedSenderToken);
+        json_decref(jsonResponse);
+        return -1;
+      }
+
+      lprintf(1, "[%s] Number of streamIds %zu", cinfo->hostname, num_streams);
+      cinfo->writepatterns_str = (char**)malloc(num_streams * sizeof(char*));
+      cinfo->writepatterns = (pcre**)malloc(num_streams * sizeof(pcre*));
+      if (cinfo->writepatterns == NULL || cinfo->writepatterns_str == NULL) {
+        // TODO: Properly handle the error if reallocation fails
+        lprintf (0, "[%s] Error allocating memory", cinfo->hostname);
+
+        json_decref(streamIdsArray);
+        json_decref(decodedSenderToken);
+        json_decref(jsonResponse);
+        return -1;
+      }
+
+      json_array_foreach(streamIdsArray, index, streamId) {
+        if (json_is_string(streamId))
+        {
+          // Compile pcre pattern from string
+          const char *streamIdStr = json_string_value(streamId);
+          pcre *pattern = pcre_compile (streamIdStr, 0, &errptr, &erroffset, NULL);
+          if (errptr){
+            lprintf (0, "JWTToken: Error with pcre_compile: %s (offset: %d)", errptr, erroffset);
+
+            if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Internal error occured", 0, 1, 1))
+              ret = -1;
+
+            json_decref(streamIdsArray);
+            json_decref(decodedSenderToken);
+            json_decref(jsonResponse);
+            return ret;
+          }
+          cinfo->writepatterns[cinfo->writepattern_count] = pattern;
+
+          size_t pattern_str_size = (strlen(streamIdStr)+1) * sizeof(char);
+          if (pattern_str_size > DL_MAX_STREAMID_STR_LEN){
+            lprintf(0, "Length of streamId string (%s, %d) exceeded maximum: %zu",
+                streamIdStr, pattern_str_size, DL_MAX_STREAMID_STR_LEN);
+            json_decref(exp_ptr);
+            json_decref(decodedSenderToken);
+            json_decref(jsonResponse);
+            return -1;
+          }
+          cinfo->writepatterns_str[cinfo->writepattern_count] = malloc(pattern_str_size);
+          strncpy(cinfo->writepatterns_str[cinfo->writepattern_count], streamIdStr, pattern_str_size);
+
+          cinfo->writepattern_count++;
+        }
+        else
+        {
+          lprintf(0, "Invalid streamId at index %zu\n", index);
+
+          json_decref(streamIdsArray);
+          json_decref(decodedSenderToken);
+          json_decref(jsonResponse);
+          return -1;
+        }
+      }
+      json_decref(streamIdsArray);
+
+      // Print stream IDs
+      int i;
+      lprintf(1, "[%s] Stream IDs:", cinfo->hostname);
+      for (i = 0; i < cinfo->writepattern_count; i++) {
+        lprintf(1, "[%s]    %s", cinfo->hostname, cinfo->writepatterns_str[i]);
+      }
+
+      // Update write authority flag
+      cinfo->authorized = 1;
+
+      lprintf (1, "[%s] AUTH_OK: Granted authorization to WRITE on streamIds", cinfo->hostname);
+      snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_OK: Granted authorization to WRITE on streamIds");
+
+      if (SendPacket (cinfo, "OK", sendbuffer, 0, 1, 1))
+        ret = -1;
+
+      // Cleanup
+      json_decref(decodedSenderToken);
+    }
+    else if (response_code == INBEHALF_VERIFICATION_SUCCESS_NEW_TOKEN)
+    {
+      //const char *accessToken = json_string_value(json_object_get(decodedSenderToken, "accessToken"));
+      lprintf (1, "[%s] AUTH_OK: Granted authorization to WRITE on streamIds, added to list of devices", cinfo->hostname);
+      snprintf (sendbuffer, sizeof (sendbuffer),
+          "AUTH_OK: Granted authorization to WRITE on streamIds, added to list of devices");
+      // TODO: add to jwttoken and writepattern
+
+      if (SendPacket (cinfo, "OK", sendbuffer, 0, 1, 1))
+        ret = -1;
+
+      // TODO: Update bearertoken
+    }
+    else if (response_code == INBEHALF_VERIFICATION_INVALID_TOKEN)
+    {
+      lprintf (0, "[%s] AUTH_ERR: Invalid token", cinfo->hostname);
+      if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Invalid token", 0, 1, 1))
+        ret = -1;
+    }
+    else if (response_code == INBEHALF_VERIFICATION_INVALID_ROLE)
+    {
+      lprintf (0, "[%s] AUTH_ERR: Role in token is invalid", cinfo->hostname);
+      if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Role in token is invalid", 0, 1, 1))
+        ret = -1;
+    }
+    else if (response_code == INBEHALF_VERIFICATION_EXPIRED_TOKEN)
+    {
+      lprintf (0, "[%s] AUTH_ERR: Expired token", cinfo->hostname);
+      if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Expired token", 0, 1, 1))
+        ret = -1;
+    }
+    else
+    {
+      // TODO: Other cases such as the VERIFICATION cases for bearertoken
+      lprintf (0, "[%s] AUTH_ERR: Error requesting token verification from %s", cinfo->hostname, authserver);
+      snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_ERR: Error requesting token verification from %s",
+          authserver);
+      if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
+        ret = -1;
+    }
+
+    // Cleanup
+    json_decref(jsonResponse);
+    return ret;
+  }
+
   /* BYE - End connection */
   else if (!strncasecmp (cinfo->recvbuf, "BYE", 3))
   {
@@ -617,6 +1094,9 @@ HandleWrite (ClientInfo *cinfo)
 
   MSRecord *msr = 0;
   char *type;
+  pcre_extra *match_extra = NULL;
+  int pcre_result = 0;
+  uint8_t found_match = 0;
 
   if (!cinfo)
     return -1;
@@ -626,27 +1106,68 @@ HandleWrite (ClientInfo *cinfo)
               streamid, &(cinfo->packet.datastart), &(cinfo->packet.dataend),
               flags, &(cinfo->packet.datasize)) != 5)
   {
-    lprintf (1, "[%s] Error parsing WRITE parameters: %.100s",
+    lprintf (1, "[%s] WRITE_ERR: Error parsing WRITE parameters: %.100s",
              cinfo->hostname, cinfo->recvbuf);
 
-    SendPacket (cinfo, "ERROR", "Error parsing WRITE command parameters", 0, 1, 1);
+    SendPacket (cinfo, "ERROR", "WRITE_ERR: Error parsing WRITE command parameters", 0, 1, 1);
 
     return -1;
   }
 
-  /* Check that client is allowed to write this stream ID if limit is present */
-  if (cinfo->reader->limit)
+  /* Check authority to WRITE on patterns*/
+  if (!cinfo->writepatterns)
   {
-    if (pcre_exec (cinfo->reader->limit, cinfo->reader->limit_extra, streamid, strlen (streamid), 0, 0, NULL, 0))
-    {
-      lprintf (1, "[%s] Error, permission denied for WRITE of stream ID: %s",
-               cinfo->hostname, streamid);
+    lprintf (1, "[%s] WRITE_ERR: Client has no linked devices",
+             cinfo->hostname, streamid, pcre_result);
 
-      snprintf (replystr, sizeof (replystr), "Error, permission denied for WRITE of stream ID: %s", streamid);
+    snprintf (replystr, sizeof (replystr), "WRITE_ERR: Client has no linked devices");
+    SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
+
+    return -1;
+  }
+
+  /* Check if token is expired */
+  time_t currTime = time(NULL);
+  if (currTime > cinfo->tokenExpiry) {
+    lprintf (1, "[%s] WRITE_ERR: Token expired: %d > %d",
+             cinfo->hostname, currTime, cinfo->tokenExpiry);
+
+    snprintf (replystr, sizeof (replystr), "WRITE_ERR: Token expired");
+    SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
+    return -1;
+  }
+
+  /* Check if streamid of packet to be written is in array of allowed client's writepatterns*/
+  found_match = 0;
+  for(int i = 0; i < cinfo->writepattern_count; i++){ // TODO: Optimize this? (see DL_MAX_NUM_STREAMID)
+    pcre_result = pcre_exec (cinfo->writepatterns[i], match_extra, streamid, strlen (streamid), 0, 0, NULL, 0);
+    if (match_extra) {
+      pcre_free(match_extra);  // deallocate the memory
+      match_extra = NULL;      // make pointer point to nothing for next iteration
+    }
+
+    if(pcre_result<0){ // PCRE_ERROR_NOMATCH=-1
+      continue;
+    }else{
+      found_match = 1;
+      break;
+    }
+  }
+
+  if(found_match)
+  {
+      lprintf (3, "[%s]: Token authorized to WRITE on streamid: %s, pcre_result: %d",
+               cinfo->hostname, streamid, pcre_result);
+  }
+  else
+  {
+      lprintf (1, "[%s] WRITE_ERR: Token not authorized to WRITE streamid: %s, pcre_result: %d",
+               cinfo->hostname, streamid, pcre_result);
+
+      snprintf (replystr, sizeof (replystr), "WRITE_ERR: Token not authorized to WRITE on %s", streamid);
       SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
 
       return -1;
-    }
   }
 
   /* Copy the stream ID */
@@ -757,7 +1278,7 @@ HandleWrite (ClientInfo *cinfo)
   /* Send acknowledgement if requested (flags contain 'A') */
   if (strchr (flags, 'A'))
   {
-    if (SendPacket (cinfo, "OK", NULL, cinfo->packet.pktid, 1, 1))
+    if (SendPacket (cinfo, "OK", "WRITE_OK: Packet written in server", cinfo->packet.pktid, 1, 1))
       return -1;
   }
 
