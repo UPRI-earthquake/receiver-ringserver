@@ -200,11 +200,11 @@ DLHandleCmd (ClientInfo *cinfo)
     /* NOTE: if client has writeperm (see conf WriteIP), then that overrides token requirement,
      * meaning they may send even without AUTHORIZATION command
      */
-    if (!cinfo->writeperm && !cinfo->jwttoken)
+    if (!cinfo->authorized)
     {
       lprintf (1, "[%s] WRITE_ERR: Data packet received from client without write permission",
                cinfo->hostname);
-      SendPacket (cinfo, "ERROR", "WRITE_ERR: Write permission not granted, missing writeperm or token", 0, 1, 1);
+      SendPacket (cinfo, "ERROR", "WRITE_ERR: Write permission not granted, missing token", 0, 1, 1);
       return -1;
     }
     /* Any errors from HandleWrite are fatal */
@@ -1115,65 +1115,61 @@ HandleWrite (ClientInfo *cinfo)
     return -1;
   }
 
-  /* Check authority to WRITE */
-  if (cinfo->authorized && cinfo->writepatterns)
+  /* Check authority to WRITE on patterns*/
+  if (!cinfo->writepatterns)
   {
-    /* Check if token is expired */
-    time_t currTime = time(NULL);
-    if (currTime > cinfo->tokenExpiry) {
-      lprintf (1, "[%s] WRITE_ERR: Token expired: %d > %d",
-               cinfo->hostname, currTime, cinfo->tokenExpiry);
-
-      snprintf (replystr, sizeof (replystr), "WRITE_ERR: Token expired");
-      SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
-      return -1;
-    }
-
-    /* Check if streamid of packet to be written is in array of allowed client's writepatterns*/
-    found_match = 0;
-    for(int i = 0; i < cinfo->writepattern_count; i++){ // TODO: Optimize this? (see DL_MAX_NUM_STREAMID)
-      pcre_result = pcre_exec (cinfo->writepatterns[i], match_extra, streamid, strlen (streamid), 0, 0, NULL, 0);
-      if (match_extra) {
-        pcre_free(match_extra);  // deallocate the memory
-        match_extra = NULL;      // make pointer point to nothing for next iteration
-      }
-
-      if(pcre_result<0){ // PCRE_ERROR_NOMATCH=-1
-        continue;
-      }else{
-        found_match = 1;
-        break;
-      }
-    }
-
-    if(found_match)
-    {
-        lprintf (3, "[%s]: Token authorized to WRITE on streamid: %s, pcre_result: %d",
-                 cinfo->hostname, streamid, pcre_result);
-    }
-    else
-    {
-        lprintf (1, "[%s] WRITE_ERR: Token not authorized to WRITE streamid: %s, pcre_result: %d",
-                 cinfo->hostname, streamid, pcre_result);
-
-        snprintf (replystr, sizeof (replystr), "WRITE_ERR: Token not authorized to WRITE on %s", streamid);
-        SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
-
-        return -1;
-    }
-  }
-  else
-  {
-    lprintf (1, "[%s] WRITE_ERR: No AUTHORIZATION to WRITE",
+    lprintf (1, "[%s] WRITE_ERR: Client has no linked devices",
              cinfo->hostname, streamid, pcre_result);
 
-    snprintf (replystr, sizeof (replystr), "WRITE_ERR: No AUTHORIZATION to WRITE");
+    snprintf (replystr, sizeof (replystr), "WRITE_ERR: Client has no linked devices");
     SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
 
     return -1;
   }
 
+  /* Check if token is expired */
+  time_t currTime = time(NULL);
+  if (currTime > cinfo->tokenExpiry) {
+    lprintf (1, "[%s] WRITE_ERR: Token expired: %d > %d",
+             cinfo->hostname, currTime, cinfo->tokenExpiry);
 
+    snprintf (replystr, sizeof (replystr), "WRITE_ERR: Token expired");
+    SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
+    return -1;
+  }
+
+  /* Check if streamid of packet to be written is in array of allowed client's writepatterns*/
+  found_match = 0;
+  for(int i = 0; i < cinfo->writepattern_count; i++){ // TODO: Optimize this? (see DL_MAX_NUM_STREAMID)
+    pcre_result = pcre_exec (cinfo->writepatterns[i], match_extra, streamid, strlen (streamid), 0, 0, NULL, 0);
+    if (match_extra) {
+      pcre_free(match_extra);  // deallocate the memory
+      match_extra = NULL;      // make pointer point to nothing for next iteration
+    }
+
+    if(pcre_result<0){ // PCRE_ERROR_NOMATCH=-1
+      continue;
+    }else{
+      found_match = 1;
+      break;
+    }
+  }
+
+  if(found_match)
+  {
+      lprintf (3, "[%s]: Token authorized to WRITE on streamid: %s, pcre_result: %d",
+               cinfo->hostname, streamid, pcre_result);
+  }
+  else
+  {
+      lprintf (1, "[%s] WRITE_ERR: Token not authorized to WRITE streamid: %s, pcre_result: %d",
+               cinfo->hostname, streamid, pcre_result);
+
+      snprintf (replystr, sizeof (replystr), "WRITE_ERR: Token not authorized to WRITE on %s", streamid);
+      SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
+
+      return -1;
+  }
 
   /* Copy the stream ID */
   memcpy (cinfo->packet.streamid, streamid, sizeof (cinfo->packet.streamid));
