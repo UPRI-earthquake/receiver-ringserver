@@ -40,11 +40,13 @@ sudo apt-get install libjwt-dev libjansson-dev
 
 # libcurl (required by https request)
 1. download from github release into dir: https://github.com/curl/curl/releases/tag/curl-8_1_1
-    $ wget https://github.com/curl/curl/archive/refs/tags/curl-8_1_1.tar.gz
-2. Build curl, follow: https://github.com/curl/curl/blob/master/GIT-INFO (no need to run autoreconf)
-	1. ./configure --with-openssl
-	2. make
-	3. sudo make install
+    1. wget https://github.com/curl/curl/archive/refs/tags/curl-8_1_1.tar.gz
+    2. tar xzf curl-8_1_1.tar.gz
+2. Build curl, follow: https://github.com/curl/curl/blob/master/GIT-INFO
+	1. autoreconf -fi (might require to install libtool and autoconf)
+    2. ./configure --with-openssl
+	3. make
+	4. sudo make install
 3. Check that it's installed via: ls /usr/local/include which should show curl
 
 
