@@ -201,9 +201,14 @@ DLHandleCmd (ClientInfo *cinfo)
      */
     if (!cinfo->authorized)
     {
-      lprintf (1, "[%s] WRITE_ERR: Data packet received from client without write permission",
-               cinfo->hostname);
-      SendPacket (cinfo, "ERROR", "WRITE_ERR: Write permission not granted, missing token", 0, 1, 1);
+      char replystr[200];
+
+      lprintf (1, "[%s] %s: Data packet received from client without write permission",
+          cinfo->hostname, WRITE_UNAUTHORIZED_ERROR_STR);
+      snprintf (replystr, sizeof (replystr), "%s: Write request not granted, no token provided",
+          WRITE_UNAUTHORIZED_ERROR_STR);
+      SendPacket (cinfo, "ERROR",replystr, 0, 1, 1);
+
       return -1;
     }
     /* Any errors from HandleWrite are fatal */
@@ -1040,7 +1045,7 @@ HandleNegotiation (ClientInfo *cinfo)
       // TODO: Specifically handle other cases such as the VERIFICATION cases for bearertoken
       lprintf (0, "[%s] %s: Error code from AuthServer = %d", cinfo->hostname, AUTH_INTERNAL_ERROR_STR,
           authserver_response_code);
-      snprintf (sendbuffer, sizeof (sendbuffer), "%s: Internal error occured on RingServer", 
+      snprintf (sendbuffer, sizeof (sendbuffer), "%s: Internal error occured on RingServer",
           AUTH_INTERNAL_ERROR_STR);
       if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
         ret = -1;
@@ -1114,10 +1119,11 @@ HandleWrite (ClientInfo *cinfo)
               streamid, &(cinfo->packet.datastart), &(cinfo->packet.dataend),
               flags, &(cinfo->packet.datasize)) != 5)
   {
-    lprintf (1, "[%s] WRITE_ERR: Error parsing WRITE parameters: %.100s",
-             cinfo->hostname, cinfo->recvbuf);
-
-    SendPacket (cinfo, "ERROR", "WRITE_ERR: Error parsing WRITE command parameters", 0, 1, 1);
+    lprintf (1, "[%s] %s: Error parsing WRITE parameters: %.100s",
+             cinfo->hostname, WRITE_FORMAT_ERROR_STR, cinfo->recvbuf);
+    snprintf (replystr, sizeof (replystr), "%s: Error parsing your WRITE command parameters",
+        WRITE_FORMAT_ERROR_STR);
+    SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
 
     return -1;
   }
@@ -1125,10 +1131,10 @@ HandleWrite (ClientInfo *cinfo)
   /* Check authority to WRITE on patterns*/
   if (!cinfo->writepatterns)
   {
-    lprintf (1, "[%s] WRITE_ERR: Client has no linked devices, %s not linked",
-             cinfo->hostname, streamid);
-
-    snprintf (replystr, sizeof (replystr), "WRITE_ERR: Client has no linked devices");
+    lprintf (1, "[%s] %s: Client has no linked devices, %s is not linked",
+             cinfo->hostname, WRITE_NO_DEVICE_ERROR_STR, streamid);
+    snprintf (replystr, sizeof (replystr), "%s: You have no linked devices, %s is not linked",
+        WRITE_NO_DEVICE_ERROR_STR, streamid);
     SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
 
     return -1;
@@ -1137,10 +1143,9 @@ HandleWrite (ClientInfo *cinfo)
   /* Check if token is expired */
   time_t currTime = time(NULL);
   if (currTime > cinfo->tokenExpiry) {
-    lprintf (1, "[%s] WRITE_ERR: Token expired: %lu > %d",
-             cinfo->hostname, currTime, cinfo->tokenExpiry);
-
-    snprintf (replystr, sizeof (replystr), "WRITE_ERR: Token expired");
+    lprintf (1, "[%s] %s: Client token expired: %lu > %d",
+             cinfo->hostname, WRITE_EXPIRED_TOKEN_ERROR_STR, currTime, cinfo->tokenExpiry);
+    snprintf (replystr, sizeof (replystr), "%s: Your token has expired", WRITE_EXPIRED_TOKEN_ERROR_STR);
     SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
     return -1;
   }
@@ -1169,10 +1174,10 @@ HandleWrite (ClientInfo *cinfo)
   }
   else
   {
-      lprintf (1, "[%s] WRITE_ERR: Token not authorized to WRITE streamid: %s, pcre_result: %d",
-               cinfo->hostname, streamid, pcre_result);
-
-      snprintf (replystr, sizeof (replystr), "WRITE_ERR: Token not authorized to WRITE on %s", streamid);
+      lprintf (1, "[%s] %s: Client not authorized to WRITE on streamid: %s, pcre_result: %d",
+               cinfo->hostname, WRITE_STREAM_UNAUTHORIZED_ERROR_STR, streamid, pcre_result);
+      snprintf (replystr, sizeof (replystr), "%s: You are not authorized to WRITE on %s",
+          WRITE_STREAM_UNAUTHORIZED_ERROR_STR, streamid);
       SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
 
       return -1;
