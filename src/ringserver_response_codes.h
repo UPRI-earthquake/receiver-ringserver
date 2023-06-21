@@ -27,8 +27,8 @@
 #define WRITE_NO_DEVICE_ERROR             141  // Client has write permission (token) but has no specified device to write on
 #define WRITE_EXPIRED_TOKEN_ERROR         151  // Client's write permission (token) is expired
                                              
-#define AUTH_SUCCESS                      200
-#define AUTH_ERROR                        201
+#define AUTH_SUCCESS                      200  // Catch all success
+#define AUTH_ERROR                        201  // Catch all error
 #define AUTH_INTERNAL_ERROR               211  // Error due to error within ringserver processes
 #define AUTH_TOKEN_SIZE_ERROR             221  // Size of token isn't as expected (ie too large)
 #define AUTH_INVALID_TOKEN_ERROR          231  // Token is not a valid token from AuthServer
@@ -37,18 +37,23 @@
                                                                                              
                                       
 // Define response codes as strings
-#define GENERIC_SUCCESS_STR                 "GENERIC_SUCCESS"
-#define GENERIC_ERROR_STR                   "GENERIC_ERROR"
+#define GENERIC_SUCCESS_STR                  "GENERIC_SUCCESS"
+#define GENERIC_ERROR_STR                    "GENERIC_ERROR"
 
-#define WRITE_SUCCESS_STR                   "WRITE_SUCCESS"
-#define WRITE_ERROR_STR                     "WRITE_ERROR"
+#define WRITE_SUCCESS_STR                    "WRITE_SUCCESS"
+#define WRITE_ERROR_STR                      "WRITE_ERROR"
+#define WRITE_INTERNAL_ERROR_STR             "WRITE_INTERNAL_ERROR"
+#define WRITE_UNAUTHORIZED_ERROR_STR         "WRITE_UNAUTHORIZED_ERROR"
+#define WRITE_STREAM_UNAUTHORIZED_ERROR_STR  "WRITE_STREAM_UNAUTHORIZED_ERROR"
+#define WRITE_NO_DEVICE_ERROR_STR            "WRITE_NO_DEVICE_ERROR"
+#define WRITE_EXPIRED_TOKEN_ERROR_STR        "WRITE_EXPIRED_TOKEN_ERROR"
 
-#define AUTH_SUCCESS_STR           "AUTH_SUCCESS"
-#define AUTH_ERROR_STR             "AUTH_ERROR"
-
-// Define the default messages for each response status code
-#define GENERIC_SUCCESS_MSG                 "Success"
-#define GENERIC_ERROR_MSG                   "Error"
-
+#define AUTH_SUCCESS_STR                     "AUTH_SUCCESS"
+#define AUTH_ERROR_STR                       "AUTH_ERROR"
+#define AUTH_INTERNAL_ERROR_STR              "AUTH_INTERNAL_ERROR"
+#define AUTH_TOKEN_SIZE_ERROR_STR            "AUTH_TOKEN_SIZE_ERROR"
+#define AUTH_INVALID_TOKEN_ERROR_STR         "AUTH_INVALID_TOKEN_ERROR"
+#define AUTH_ROLE_INVALID_ERROR_STR          "AUTH_ROLE_INVALID_ERROR"
+#define AUTH_EXPIRED_TOKEN_ERROR_STR         "AUTH_EXPIRED_TOKEN_ERROR"
 
 #endif  /* RINGSERVER_RESPONSE_CODES_H */
