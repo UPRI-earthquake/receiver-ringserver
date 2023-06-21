@@ -2,7 +2,7 @@
 #define RINGSERVER_RESPONSE_CODES_H
 
 /* Status Code Format: XYZ 
- * X : 0-n based on response group (ie GENERIC is 0, WRITE is 1, AUTHORIZATION is 2, and so on)
+ * X : 0-n based on response group (ie GENERIC is 0, WRITE is 1, AUTH(ORIZATION) is 2, and so on)
  * Y : 0-n increments as type changes within a response group
  * Z : 0 if success type, 1 if error type
  * 
@@ -16,16 +16,25 @@
  */
 
 // Define constant integer values for response status codes
-#define GENERIC_SUCCESS                 0
-#define GENERIC_ERROR                   1
+#define GENERIC_SUCCESS                   0
+#define GENERIC_ERROR                     1
 
-#define WRITE_SUCCESS                   100  // Catch all success
-#define WRITE_ERROR                     101  // Catch all error
-#define WRITE_INTERNAL ERROR            111  // Error due to error in ringserver
-#define WRITE_UNAUTHORIZED              121  // Client has no write permission (token)
-#define WRITE_STREAM_UNAUTHORIZED       131  // Client has write permission (token) but doesn't authorize write on this stream
-#define WRITE_NO_DEVICE_LINKED          141  // Client has write permission (token) but has no specified device to write on
-#define WRITE_EXPIRED_TOKEN             151  // Client's write permission (token) is expired
+#define WRITE_SUCCESS                     100  // Catch all success
+#define WRITE_ERROR                       101  // Catch all error
+#define WRITE_INTERNAL_ERROR              111  // Error due to error in ringserver
+#define WRITE_UNAUTHORIZED_ERROR          121  // Client has no write permission (token)
+#define WRITE_STREAM_UNAUTHORIZED_ERROR   131  // Client has write permission (token) but doesn't authorize write on this stream
+#define WRITE_NO_DEVICE_ERROR             141  // Client has write permission (token) but has no specified device to write on
+#define WRITE_EXPIRED_TOKEN_ERROR         151  // Client's write permission (token) is expired
+                                             
+#define AUTH_SUCCESS                      200
+#define AUTH_ERROR                        201
+#define AUTH_INTERNAL_ERROR               211  // Error due to error within ringserver processes
+#define AUTH_TOKEN_SIZE_ERROR             221  // Size of token isn't as expected (ie too large)
+#define AUTH_INVALID_TOKEN_ERROR          231  // Token is not a valid token from AuthServer
+#define AUTH_ROLE_INVALID_ERROR           241  // Role in token isn't what's expected (ie should be sensor)
+#define AUTH_EXPIRED_TOKEN_ERROR          251  // Token is expired
+                                                                                             
                                       
 // Define response codes as strings
 #define GENERIC_SUCCESS_STR                 "GENERIC_SUCCESS"
@@ -34,8 +43,8 @@
 #define WRITE_SUCCESS_STR                   "WRITE_SUCCESS"
 #define WRITE_ERROR_STR                     "WRITE_ERROR"
 
-#define AUTHORIZATION_SUCCESS_STR           "AUTHORIZATION_SUCCESS"
-#define AUTHORIZATION_ERROR_STR             "AUTHORIZATION_ERROR"
+#define AUTH_SUCCESS_STR           "AUTH_SUCCESS"
+#define AUTH_ERROR_STR             "AUTH_ERROR"
 
 // Define the default messages for each response status code
 #define GENERIC_SUCCESS_MSG                 "Success"
