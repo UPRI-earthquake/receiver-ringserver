@@ -49,7 +49,8 @@
 #include "rbtree.h"
 #include "ring.h"
 #include "ringserver.h"
-#include "response_codes.h"
+#include "authserver_response_codes.h"
+#include "ringserver_response_codes.h"
 
 /* Define the number of no-action loops that trigger the throttle */
 #define THROTTLE_TRIGGER 10
@@ -708,7 +709,7 @@ HandleNegotiation (ClientInfo *cinfo)
     /* Check received token size */
     if (size > DLMAXREGEXLEN)
     {
-      lprintf (0, "[%s] AUTH_ERR: Authorization token too large (%)", cinfo->hostname, size);
+      lprintf (0, "[%s] %s: Authorization token too large (%d)", cinfo->hostname, AUTH_TOKEN_SIZE_ERROR_STR, size);
 
       snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_ERR: Authorization token too large, must be <= %d",
                 DLMAXREGEXLEN);
@@ -782,7 +783,7 @@ HandleNegotiation (ClientInfo *cinfo)
     long file_size = ftell(fp);     // get current position of file pointer
     fseek(fp, 0, SEEK_SET);         // putback cursor to 0 offset from start
     if (file_size > DLMAXREGEXLEN){
-      lprintf (0, "[%s] Token in authdir/secret.key is too large: %d",
+      lprintf (0, "[%s] Token in authdir/secret.key is too large: %ld",
                cinfo->hostname, file_size);
       return -1;
     }
@@ -862,7 +863,7 @@ HandleNegotiation (ClientInfo *cinfo)
 
     // Check if parsing was successful
     if (jsonResponse == NULL) {
-      lprintf(0, "[%s] JSON parsing error: on line %d: %s\n", err.line, err.text);
+      lprintf(0, "[%s] JSON parsing error: on line %d: %s\n", cinfo->hostname, err.line, err.text);
       return -1;
     }
 
@@ -954,7 +955,7 @@ HandleNegotiation (ClientInfo *cinfo)
 
           size_t pattern_str_size = (strlen(streamIdStr)+1) * sizeof(char);
           if (pattern_str_size > DL_MAX_STREAMID_STR_LEN){
-            lprintf(0, "Length of streamId string (%s, %d) exceeded maximum: %zu",
+            lprintf(0, "Length of streamId string (%s, %lu) exceeded maximum: %d",
                 streamIdStr, pattern_str_size, DL_MAX_STREAMID_STR_LEN);
             json_decref(exp_ptr);
             json_decref(decodedSenderToken);
@@ -1117,8 +1118,8 @@ HandleWrite (ClientInfo *cinfo)
   /* Check authority to WRITE on patterns*/
   if (!cinfo->writepatterns)
   {
-    lprintf (1, "[%s] WRITE_ERR: Client has no linked devices",
-             cinfo->hostname, streamid, pcre_result);
+    lprintf (1, "[%s] WRITE_ERR: Client has no linked devices, %s not linked",
+             cinfo->hostname, streamid);
 
     snprintf (replystr, sizeof (replystr), "WRITE_ERR: Client has no linked devices");
     SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
@@ -1129,7 +1130,7 @@ HandleWrite (ClientInfo *cinfo)
   /* Check if token is expired */
   time_t currTime = time(NULL);
   if (currTime > cinfo->tokenExpiry) {
-    lprintf (1, "[%s] WRITE_ERR: Token expired: %d > %d",
+    lprintf (1, "[%s] WRITE_ERR: Token expired: %lu > %d",
              cinfo->hostname, currTime, cinfo->tokenExpiry);
 
     snprintf (replystr, sizeof (replystr), "WRITE_ERR: Token expired");
