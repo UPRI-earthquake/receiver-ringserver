@@ -710,9 +710,8 @@ HandleNegotiation (ClientInfo *cinfo)
     if (size > DLMAXREGEXLEN)
     {
       lprintf (0, "[%s] %s: Authorization token too large (%d)", cinfo->hostname, AUTH_TOKEN_SIZE_ERROR_STR, size);
-
-      snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_ERR: Authorization token too large, must be <= %d",
-                DLMAXREGEXLEN);
+      snprintf (sendbuffer, sizeof (sendbuffer), "%s: Authorization token too large (%d), must be <= %d",
+                AUTH_TOKEN_SIZE_ERROR_STR, size, DLMAXREGEXLEN);
       if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1)) {
         return -1;
       } else {
@@ -723,10 +722,10 @@ HandleNegotiation (ClientInfo *cinfo)
     /* Check if AuthServer is configured */
     if ( ! authserver)
     {
-      lprintf (0, "[%s] AUTH_ERR: Cannot authorize for write, AuthServer not configured", cinfo->hostname);
+      lprintf (0, "[%s] %s: Cannot authorize for write, AuthServer-setting not configured", cinfo->hostname, AUTH_INTERNAL_ERROR_STR);
 
       snprintf (sendbuffer, sizeof (sendbuffer),
-          "[%s] AUTH_ERR: cannot authorize for write, AuthServer not configured", cinfo->hostname);
+          "%s: Cannot authorize for write, RingServer not properly configured", AUTH_INTERNAL_ERROR_STR);
       if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1)) {
         return -1;
       } else {
@@ -737,10 +736,10 @@ HandleNegotiation (ClientInfo *cinfo)
     /* Check if BearerToken is configured */
     if (! authdir)
     {
-      lprintf (0, "[%s] AUTH_ERR: Cannot authorize for write, BearerToken not configured", cinfo->hostname);
+      lprintf (0, "[%s] %s: Cannot authorize for write, BearerToken-setting not configured", cinfo->hostname, AUTH_INTERNAL_ERROR_STR);
 
       snprintf (sendbuffer, sizeof (sendbuffer),
-          "[%s] AUTH_ERR: cannot authorize for write, BearerToken not configured", cinfo->hostname);
+          "%s: Cannot authorize for write, RingServer not properly configured", AUTH_INTERNAL_ERROR_STR);
       if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1)) {
         return -1;
       } else {
@@ -867,10 +866,10 @@ HandleNegotiation (ClientInfo *cinfo)
       return -1;
     }
 
-    int response_code = json_integer_value(json_object_get(jsonResponse, "status"));
+    int authserver_response_code = json_integer_value(json_object_get(jsonResponse, "status"));
 
     int ret = 0;
-    if (response_code == INBEHALF_VERIFICATION_SUCCESS)
+    if (authserver_response_code == INBEHALF_VERIFICATION_SUCCESS)
     {
       // Get JSON components
       json_t *decodedSenderToken = json_object_get(jsonResponse, "decodedSenderToken");
@@ -941,9 +940,11 @@ HandleNegotiation (ClientInfo *cinfo)
           const char *streamIdStr = json_string_value(streamId);
           pcre *pattern = pcre_compile (streamIdStr, 0, &errptr, &erroffset, NULL);
           if (errptr){
-            lprintf (0, "JWTToken: Error with pcre_compile: %s (offset: %d)", errptr, erroffset);
+            lprintf (0, "[%s] %s: Error with JWTToken & pcre_compile: %s (offset: %d)", cinfo->hostname,
+                AUTH_INTERNAL_ERROR_STR, errptr, erroffset);
+            snprintf (sendbuffer, sizeof (sendbuffer), "%s: Internal error occured on RingServer", AUTH_INTERNAL_ERROR_STR);
 
-            if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Internal error occured", 0, 1, 1))
+            if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
               ret = -1;
 
             json_decref(streamIdsArray);
@@ -989,8 +990,8 @@ HandleNegotiation (ClientInfo *cinfo)
       // Update write authority flag
       cinfo->authorized = 1;
 
-      lprintf (1, "[%s] AUTH_OK: Granted authorization to WRITE on streamIds", cinfo->hostname);
-      snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_OK: Granted authorization to WRITE on streamIds");
+      lprintf (1, "[%s] %s: Granted authorization to WRITE on streamIds", cinfo->hostname, AUTH_SUCCESS_STR);
+      snprintf (sendbuffer, sizeof (sendbuffer), "%s: Granted authorization to WRITE on streamIds", AUTH_SUCCESS_STR);
 
       if (SendPacket (cinfo, "OK", sendbuffer, 0, 1, 1))
         ret = -1;
@@ -998,6 +999,7 @@ HandleNegotiation (ClientInfo *cinfo)
       // Cleanup
       json_decref(decodedSenderToken);
     }
+#if 0 // This part will be removed once jwt's don't store streamids in them anymore
     else if (response_code == INBEHALF_VERIFICATION_SUCCESS_NEW_TOKEN)
     {
       //const char *accessToken = json_string_value(json_object_get(decodedSenderToken, "accessToken"));
@@ -1011,30 +1013,35 @@ HandleNegotiation (ClientInfo *cinfo)
 
       // TODO: Update bearertoken
     }
-    else if (response_code == INBEHALF_VERIFICATION_INVALID_TOKEN)
+#endif
+    else if (authserver_response_code == INBEHALF_VERIFICATION_INVALID_TOKEN)
     {
-      lprintf (0, "[%s] AUTH_ERR: Invalid token", cinfo->hostname);
-      if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Invalid token", 0, 1, 1))
+      lprintf (0, "[%s] %s: Sensor token invalid", cinfo->hostname, AUTH_INVALID_TOKEN_ERROR_STR);
+      snprintf (sendbuffer, sizeof (sendbuffer), "%s: Sensor token invalid", AUTH_INVALID_TOKEN_ERROR_STR);
+      if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
         ret = -1;
     }
-    else if (response_code == INBEHALF_VERIFICATION_INVALID_ROLE)
+    else if (authserver_response_code == INBEHALF_VERIFICATION_INVALID_ROLE)
     {
-      lprintf (0, "[%s] AUTH_ERR: Role in token is invalid", cinfo->hostname);
-      if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Role in token is invalid", 0, 1, 1))
+      lprintf (0, "[%s] %s: Role in token invalid", cinfo->hostname, AUTH_ROLE_INVALID_ERROR_STR);
+      snprintf (sendbuffer, sizeof (sendbuffer), "%s: Role in token invalid", AUTH_ROLE_INVALID_ERROR_STR);
+      if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
         ret = -1;
     }
-    else if (response_code == INBEHALF_VERIFICATION_EXPIRED_TOKEN)
+    else if (authserver_response_code == INBEHALF_VERIFICATION_EXPIRED_TOKEN)
     {
-      lprintf (0, "[%s] AUTH_ERR: Expired token", cinfo->hostname);
-      if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Expired token", 0, 1, 1))
+      lprintf (0, "[%s] %s: Expired sensor token", cinfo->hostname, AUTH_EXPIRED_TOKEN_ERROR_STR);
+      snprintf (sendbuffer, sizeof (sendbuffer), "%s: Expired sensor token", AUTH_EXPIRED_TOKEN_ERROR_STR);
+      if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
         ret = -1;
     }
     else
     {
-      // TODO: Other cases such as the VERIFICATION cases for bearertoken
-      lprintf (0, "[%s] AUTH_ERR: Error requesting token verification from %s", cinfo->hostname, authserver);
-      snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_ERR: Error requesting token verification from %s",
-          authserver);
+      // TODO: Specifically handle other cases such as the VERIFICATION cases for bearertoken
+      lprintf (0, "[%s] %s: Error code from AuthServer = %d", cinfo->hostname, AUTH_INTERNAL_ERROR_STR,
+          authserver_response_code);
+      snprintf (sendbuffer, sizeof (sendbuffer), "%s: Internal error occured on RingServer", 
+          AUTH_INTERNAL_ERROR_STR);
       if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
         ret = -1;
     }
