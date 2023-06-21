@@ -11,18 +11,21 @@
  * 2 = AUTHENTICATION group
  * 1 = 1st type of response within authentication group  (note: types start at 0 / 0th)
  * 0 = Success code
+ *
+ * Note: Always use the most specific and apt status code for your scenario
  */
 
 // Define constant integer values for response status codes
 #define GENERIC_SUCCESS                 0
 #define GENERIC_ERROR                   1
 
-#define WRITE_SUCCESS                   100
-#define WRITE_ERROR                     101
-#define WRITE_UNAUTHORIZED              111  // Client has no write permission (token)
-#define WRITE_STREAM_UNAUTHORIZED       121  // Client has write permission (token) but doesn't authorize write on this stream
-#define WRITE_NO_DEVICE_LINKED          131  // Client has write permission (token) but has no specified device to write on
-#define WRITE_EXPIRED_TOKEN             141  // Client's write permission (token) is expired
+#define WRITE_SUCCESS                   100  // Catch all success
+#define WRITE_ERROR                     101  // Catch all error
+#define WRITE_INTERNAL ERROR            111  // Error due to error in ringserver
+#define WRITE_UNAUTHORIZED              121  // Client has no write permission (token)
+#define WRITE_STREAM_UNAUTHORIZED       131  // Client has write permission (token) but doesn't authorize write on this stream
+#define WRITE_NO_DEVICE_LINKED          141  // Client has write permission (token) but has no specified device to write on
+#define WRITE_EXPIRED_TOKEN             151  // Client's write permission (token) is expired
                                       
 // Define response codes as strings
 #define GENERIC_SUCCESS_STR                 "GENERIC_SUCCESS"
