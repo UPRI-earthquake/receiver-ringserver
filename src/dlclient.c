@@ -1244,8 +1244,9 @@ HandleWrite (ClientInfo *cinfo)
           if (ds_streamproc (cinfo->mswrite, msr, fn, cinfo->hostname))
           {
             lprintf (1, "[%s] Error writing miniSEED to disk", cinfo->hostname);
-
-            SendPacket (cinfo, "ERROR", "Error writing miniSEED to disk", 0, 1, 1);
+            snprintf (replystr, sizeof (replystr), "%s(%d): Error writing miniSEED to disk",
+                      WRITE_INTERNAL_ERROR_STR, WRITE_INTERNAL_ERROR,
+            SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
 
             return -1;
           }
