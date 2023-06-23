@@ -1183,13 +1183,13 @@ HandleWrite (ClientInfo *cinfo)
   }
   else
   {
-      lprintf (1, "[%s] %s: Client not authorized to WRITE on streamid: %s, pcre_result: %d",
+      lprintf (1, "[%s] %s: Dropping packet. Client not authorized to WRITE on streamid: %s, pcre_result: %d",
                cinfo->hostname, WRITE_STREAM_UNAUTHORIZED_ERROR_STR, streamid, pcre_result);
-      snprintf (replystr, sizeof (replystr), "%s(%d): You are not authorized to WRITE on %s",
+      snprintf (replystr, sizeof (replystr), "%s(%d): Dropping packet. You are not authorized to WRITE on %s",
           WRITE_STREAM_UNAUTHORIZED_ERROR_STR, WRITE_STREAM_UNAUTHORIZED_ERROR, streamid);
       SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
 
-      return -1;
+      return 0; // Ignore packet, don't disconnect
   }
 
   /* Copy the stream ID */

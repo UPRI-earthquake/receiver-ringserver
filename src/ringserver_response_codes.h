@@ -1,11 +1,11 @@
 #ifndef RINGSERVER_RESPONSE_CODES_H
 #define RINGSERVER_RESPONSE_CODES_H
 
-/* Status Code Format: XYZ 
+/* Status Code Format: XYZ
  * X : 0-n based on response group (ie GENERIC is 0, WRITE is 1, AUTH(ORIZATION) is 2, and so on)
  * Y : 0-n increments as type changes within a response group
  * Z : 0 if success type, 1 if error type
- * 
+ *
  * For example:
  * 210 :
  * 2 = AUTHENTICATION group
@@ -26,7 +26,7 @@
 #define WRITE_STREAM_UNAUTHORIZED_ERROR   131  // Client has write permission (token) but doesn't authorize write on this stream
 #define WRITE_NO_DEVICE_ERROR             141  // Client has write permission (token) but has no specified device to write on
 #define WRITE_EXPIRED_TOKEN_ERROR         151  // Client's write permission (token) is expired
-#define WRITE_FORMAT_ERROR                161  // Error in write command formatting leading to parsing error                                              
+#define WRITE_FORMAT_ERROR                161  // Error in write command formatting leading to parsing error
 #define WRITE_LARGE_PACKET_ERROR          171  // Packet is larger than ring packet size
 
 #define AUTH_SUCCESS                      200  // Catch all success
