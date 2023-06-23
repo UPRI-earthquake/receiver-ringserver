@@ -704,7 +704,10 @@ HandleNegotiation (ClientInfo *cinfo)
     /* Make sure we got a single pattern or no pattern */
     if (fields > 1)
     {
-      if (SendPacket (cinfo, "ERROR", "AUTHORIZATION requires a single argument", 0, 1, 1)){
+      lprintf (0, "[%s] %s: AUTHORIZATION requires a single argument", cinfo->hostname, AUTH_FORMAT_ERROR_STR);
+      snprintf (sendbuffer, sizeof (sendbuffer), "%s(%d): AUTHORIZATION requires a single argument",
+                AUTH_FORMAT_ERROR, AUTH_FORMAT_ERROR_STR);
+      if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1)){
         return -1;
       } else {
         return 0; // means negotiation completed (we've responded)

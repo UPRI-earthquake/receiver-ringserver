@@ -36,6 +36,7 @@
 #define AUTH_INVALID_TOKEN_ERROR          231  // Token is not a valid token from AuthServer
 #define AUTH_ROLE_INVALID_ERROR           241  // Role in token isn't what's expected (ie should be sensor)
 #define AUTH_EXPIRED_TOKEN_ERROR          251  // Token is expired
+#define AUTH_FORMAT_ERROR                 261  // Error in auth command formatting (ie no args given)
 
 
 // Define response codes as strings
@@ -59,5 +60,6 @@
 #define AUTH_INVALID_TOKEN_ERROR_STR         "AUTH_INVALID_TOKEN_ERROR"
 #define AUTH_ROLE_INVALID_ERROR_STR          "AUTH_ROLE_INVALID_ERROR"
 #define AUTH_EXPIRED_TOKEN_ERROR_STR         "AUTH_EXPIRED_TOKEN_ERROR"
+#define AUTH_FORMAT_ERROR_STR                "AUTH_FORMAT_ERROR"
 
 #endif  /* RINGSERVER_RESPONSE_CODES_H */
