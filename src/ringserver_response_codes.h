@@ -21,13 +21,14 @@
 
 #define WRITE_SUCCESS                     100  // Catch all success
 #define WRITE_ERROR                       101  // Catch all error
-#define WRITE_INTERNAL_ERROR              111  // Error due to error in ringserver
+#define WRITE_INTERNAL_ERROR              111  // Error due to error in ringserver, when there's nothing slink2dali can do about
 #define WRITE_UNAUTHORIZED_ERROR          121  // Client has no write permission (token)
 #define WRITE_STREAM_UNAUTHORIZED_ERROR   131  // Client has write permission (token) but doesn't authorize write on this stream
 #define WRITE_NO_DEVICE_ERROR             141  // Client has write permission (token) but has no specified device to write on
 #define WRITE_EXPIRED_TOKEN_ERROR         151  // Client's write permission (token) is expired
 #define WRITE_FORMAT_ERROR                161  // Error in write command formatting leading to parsing error                                              
-                                             
+#define WRITE_LARGE_PACKET_ERROR          171  // Packet is larger than ring packet size
+
 #define AUTH_SUCCESS                      200  // Catch all success
 #define AUTH_ERROR                        201  // Catch all error
 #define AUTH_INTERNAL_ERROR               211  // Error due to error within ringserver processes
@@ -35,8 +36,8 @@
 #define AUTH_INVALID_TOKEN_ERROR          231  // Token is not a valid token from AuthServer
 #define AUTH_ROLE_INVALID_ERROR           241  // Role in token isn't what's expected (ie should be sensor)
 #define AUTH_EXPIRED_TOKEN_ERROR          251  // Token is expired
-                                                                                             
-                                      
+
+
 // Define response codes as strings
 #define GENERIC_SUCCESS_STR                  "GENERIC_SUCCESS"
 #define GENERIC_ERROR_STR                    "GENERIC_ERROR"
@@ -49,6 +50,7 @@
 #define WRITE_NO_DEVICE_ERROR_STR            "WRITE_NO_DEVICE_ERROR"
 #define WRITE_EXPIRED_TOKEN_ERROR_STR        "WRITE_EXPIRED_TOKEN_ERROR"
 #define WRITE_FORMAT_ERROR_STR               "WRITE_FORMAT_ERROR"
+#define WRITE_LARGE_PACKET_ERROR_STR         "WRITE_LARGE_PACKET_ERROR"
 
 #define AUTH_SUCCESS_STR                     "AUTH_SUCCESS"
 #define AUTH_ERROR_STR                       "AUTH_ERROR"

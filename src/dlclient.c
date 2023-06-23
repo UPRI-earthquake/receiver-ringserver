@@ -1201,10 +1201,12 @@ HandleWrite (ClientInfo *cinfo)
   /* Make sure this packet data would fit into the ring */
   if (cinfo->packet.datasize > cinfo->ringparams->pktsize)
   {
-    lprintf (1, "[%s] Submitted packet size (%d) is greater than ring packet size (%d)",
-             cinfo->hostname, cinfo->packet.datasize, cinfo->ringparams->pktsize);
+    lprintf (1, "[%s] %s: Submitted packet size (%d) is greater than ring packet size (%d)",
+             cinfo->hostname, WRITE_LARGE_PACKET_ERROR_STR,
+             cinfo->packet.datasize, cinfo->ringparams->pktsize);
 
-    snprintf (replystr, sizeof (replystr), "Packet size (%d) is too large for ring, maximum is %d bytes",
+    snprintf (replystr, sizeof (replystr), "%s(%d): Packet size (%d) is too large for ring, maximum is %d bytes",
+              WRITE_LARGE_PACKET_ERROR_STR, WRITE_LARGE_PACKET_ERROR,
               cinfo->packet.datasize, cinfo->ringparams->pktsize);
     SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
 
@@ -1261,9 +1263,11 @@ HandleWrite (ClientInfo *cinfo)
     if (rv == -2)
       lprintf (1, "[%s] Error with RingWrite, corrupt ring, shutdown signalled", cinfo->hostname);
     else
-      lprintf (1, "[%s] Error with RingWrite", cinfo->hostname);
+      lprintf (1, "[%s] %s: Error with RingWrite", cinfo->hostname, WRITE_INTERNAL_ERROR_STR);
 
-    SendPacket (cinfo, "ERROR", "Error adding packet to ring", 0, 1, 1);
+    snprintf (replystr, sizeof (replystr), "%s(%d): Error adding packet to ring",
+              WRITE_INTERNAL_ERROR_STR, WRITE_INTERNAL_ERROR,
+    SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
 
     /* Set the shutdown signal if ring corruption was detected */
     if (rv == -2)
@@ -1300,7 +1304,9 @@ HandleWrite (ClientInfo *cinfo)
   /* Send acknowledgement if requested (flags contain 'A') */
   if (strchr (flags, 'A'))
   {
-    if (SendPacket (cinfo, "OK", "WRITE_OK: Packet written in server", cinfo->packet.pktid, 1, 1))
+    snprintf (replystr, sizeof (replystr), "%s(%d): Packet written in RingServer",
+              WRITE_SUCCESS_STR, WRITE_SUCCESS,
+    if (SendPacket (cinfo, "OK", replystr, cinfo->packet.pktid, 1, 1))
       return -1;
   }
 
