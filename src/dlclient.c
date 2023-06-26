@@ -706,7 +706,7 @@ HandleNegotiation (ClientInfo *cinfo)
     {
       lprintf (0, "[%s] %s: AUTHORIZATION requires a single argument", cinfo->hostname, AUTH_FORMAT_ERROR_STR);
       snprintf (sendbuffer, sizeof (sendbuffer), "%s(%d): AUTHORIZATION requires a single argument",
-                AUTH_FORMAT_ERROR, AUTH_FORMAT_ERROR_STR);
+                AUTH_FORMAT_ERROR_STR, AUTH_FORMAT_ERROR);
       if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1)){
         return -1;
       } else {
@@ -1248,7 +1248,7 @@ HandleWrite (ClientInfo *cinfo)
           {
             lprintf (1, "[%s] Error writing miniSEED to disk", cinfo->hostname);
             snprintf (replystr, sizeof (replystr), "%s(%d): Error writing miniSEED to disk",
-                      WRITE_INTERNAL_ERROR_STR, WRITE_INTERNAL_ERROR,
+                      WRITE_INTERNAL_ERROR_STR, WRITE_INTERNAL_ERROR);
             SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
 
             return -1;
@@ -1270,7 +1270,7 @@ HandleWrite (ClientInfo *cinfo)
       lprintf (1, "[%s] %s: Error with RingWrite", cinfo->hostname, WRITE_INTERNAL_ERROR_STR);
 
     snprintf (replystr, sizeof (replystr), "%s(%d): Error adding packet to ring",
-              WRITE_INTERNAL_ERROR_STR, WRITE_INTERNAL_ERROR,
+              WRITE_INTERNAL_ERROR_STR, WRITE_INTERNAL_ERROR);
     SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
 
     /* Set the shutdown signal if ring corruption was detected */
@@ -1309,7 +1309,7 @@ HandleWrite (ClientInfo *cinfo)
   if (strchr (flags, 'A'))
   {
     snprintf (replystr, sizeof (replystr), "%s(%d): Packet written in RingServer",
-              WRITE_SUCCESS_STR, WRITE_SUCCESS,
+              WRITE_SUCCESS_STR, WRITE_SUCCESS);
     if (SendPacket (cinfo, "OK", replystr, cinfo->packet.pktid, 1, 1))
       return -1;
   }

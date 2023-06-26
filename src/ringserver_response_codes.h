@@ -16,8 +16,8 @@
  */
 
 // Define constant integer values for response status codes
-#define GENERIC_SUCCESS                   0
-#define GENERIC_ERROR                     1
+#define GENERIC_RINGSERVER_SUCCESS        0
+#define GENERIC_RINGSERVER_ERROR          1
 
 #define WRITE_SUCCESS                     100  // Catch all success
 #define WRITE_ERROR                       101  // Catch all error
@@ -40,8 +40,8 @@
 
 
 // Define response codes as strings
-#define GENERIC_SUCCESS_STR                  "GENERIC_SUCCESS"
-#define GENERIC_ERROR_STR                    "GENERIC_ERROR"
+#define GENERIC_RINGSERVER_SUCCESS_STR       "GENERIC_RINGSERVER_SUCCESS"
+#define GENERIC_RINGSERVER_ERROR_STR         "GENERIC_RINGSERVER_ERROR"
 
 #define WRITE_SUCCESS_STR                    "WRITE_SUCCESS"
 #define WRITE_ERROR_STR                      "WRITE_ERROR"
