@@ -28,6 +28,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "clients.h"
 #include "dlclient.h"
@@ -446,6 +447,86 @@ HandleHTTP (char *recvbuffer, ClientInfo *cinfo)
 
     return (rv) ? -1 : 0;
   } /* Done with /connections request */
+  else if (!strncasecmp (path, "/sse-connections", 16))
+  {
+    /* Check for trusted flag, required to access this resource */
+    if (!cinfo->trusted)
+    {
+      lprintf (1, "[%s] HTTP CONNECTIONS-SSE request from un-trusted client",
+               cinfo->hostname);
+
+      /* Create header */
+      headlen = snprintf (cinfo->sendbuf, cinfo->sendbuflen,
+                          "HTTP/1.1 403 Forbidden, no soup for you!\r\n"
+                          "Connection: close\r\n"
+                          "%s"
+                          "\r\n",
+                          (cinfo->httpheaders) ? cinfo->httpheaders : "");
+
+      rv = SendData (cinfo, cinfo->sendbuf, MIN (headlen, cinfo->sendbuflen));
+
+      return (rv) ? -1 : 1;
+    }
+
+    lprintf (1, "[%s] Received HTTP CONNECTIONS-SSE request", cinfo->hostname);
+
+    /* Create header */
+    headlen = snprintf (cinfo->sendbuf, cinfo->sendbuflen,
+                        "HTTP/1.1 200\r\n"
+                        "Content-Type: text/event-stream\r\n"
+                        "Cache-Control: no-cache\r\n"
+                        "\r\n");
+
+    if (headlen <= 0)
+    {
+      lprintf (0, "Error creating response SSE header (CONNECTIONS-SSE request)");
+      rv = -1;
+    }
+
+    /* Send header */
+    rv = SendDataMB (cinfo,
+                     (void *[]){cinfo->sendbuf},
+                     (size_t[]){MIN (headlen, cinfo->sendbuflen)},
+                     1);
+
+    for (int i=0; i<3; i++)
+    {
+
+      char string[30];
+      /* Create response */
+      AddToString(&response, "event: connections-sse\n", "", 0, 8388608);
+      snprintf (string, sizeof (string), "data: {'i': '%d'}\n", i);
+      AddToString(&response, string, "", 0, 8388608);
+      AddToString(&response, "\n\n", "", 0, 8388608);
+      responsebytes = strlen(response);
+
+      if (responsebytes <= 0)
+      {
+        lprintf (0, "[%s] Error generating connections list", cinfo->hostname);
+
+        if (response)
+          free (response);
+        return -1;
+      }
+
+      /* Send response */
+      lprintf (0, "Sending: %s", response);
+      rv = SendDataMB (cinfo,
+                       (void *[]){response},
+                       (size_t[]){(response) ? responsebytes : 0},
+                       1);
+      if (response)
+      {
+        free (response);
+        response = NULL;
+      }
+
+      sleep(5);
+    }
+
+
+    return (rv) ? -1 : 0;
+  } /* Done with /connection-status request */
   else if (!strncasecmp (path, "/seedlink", 9))
   {
     if ((cinfo->protocols & PROTO_SEEDLINK) == 0)
