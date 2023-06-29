@@ -243,6 +243,8 @@ ClientThread (void *arg)
   cinfo->tokenExpiry = 0;
   cinfo->writepatterns = NULL;
   cinfo->writepatterns_str = NULL;
+  cinfo->username = NULL;
+  cinfo->role = NULL;
 
   /* Main client loop, delegating processing and data flow */
   while (mytdp->td_flags != TDF_CLOSE)
@@ -444,6 +446,12 @@ ClientThread (void *arg)
   if (cinfo->authorized){
     cinfo->authorized = 0;
     cinfo->tokenExpiry = 0;
+  }
+  if (cinfo->username){
+    free(cinfo->username);
+  }
+  if (cinfo->role){
+    free(cinfo->role);
   }
   if (cinfo->writepatterns){
     for(int i=0; i < cinfo->writepattern_count; i++){
