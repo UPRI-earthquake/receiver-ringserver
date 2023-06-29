@@ -453,7 +453,7 @@ HandleHTTP (char *recvbuffer, ClientInfo *cinfo)
     /* Check for trusted flag, required to access this resource */
     if (!cinfo->trusted)
     {
-      lprintf (1, "[%s] HTTP CONNECTIONS-SSE request from un-trusted client",
+      lprintf (1, "[%s] HTTP SSE-CONNECTIONS request from un-trusted client",
                cinfo->hostname);
 
       /* Create header */
@@ -469,7 +469,7 @@ HandleHTTP (char *recvbuffer, ClientInfo *cinfo)
       return (rv) ? -1 : 1;
     }
 
-    lprintf (1, "[%s] Received HTTP CONNECTIONS-SSE request", cinfo->hostname);
+    lprintf (1, "[%s] Received HTTP SSE-CONNECTIONSSSE request", cinfo->hostname);
 
     /* Create header */
     headlen = snprintf (cinfo->sendbuf, cinfo->sendbuflen,
@@ -480,7 +480,7 @@ HandleHTTP (char *recvbuffer, ClientInfo *cinfo)
 
     if (headlen <= 0)
     {
-      lprintf (0, "Error creating response SSE header (CONNECTIONS-SSE request)");
+      lprintf (0, "Error creating response SSE header (SSE-CONNECTIONS request)");
       rv = -1;
     }
 
