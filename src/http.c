@@ -495,13 +495,6 @@ HandleHTTP (char *recvbuffer, ClientInfo *cinfo)
 
       /* Create response */
       responsebytes = GenerateConnectionsJSON (cinfo, &response, path);
-      /*
-      AddToString(&response, "event: connections-sse\n", "", 0, 8388608);
-      snprintf (string, sizeof (string), "data: {'i': '%d'}\n", i);
-      AddToString(&response, string, "", 0, 8388608);
-      AddToString(&response, "\n\n", "", 0, 8388608);
-      responsebytes = strlen(response);
-      */
 
       if (responsebytes <= 0)
       {
@@ -513,18 +506,22 @@ HandleHTTP (char *recvbuffer, ClientInfo *cinfo)
       }
 
       /* Send response */
-      lprintf (0, "Sending: %s", response);
       rv = SendDataMB (cinfo,
                        (void *[]){response},
                        (size_t[]){(response) ? responsebytes : 0},
                        1);
+
       if (response)
       {
         free (response);
         response = NULL;
       }
 
-      sleep(30);
+      if (rv < 0 ){ // when send() has failed (ie when client disconnected)
+        return -1;
+      }
+
+      sleep(3); // refresh status every 3 seconds
     }
 
 
@@ -1696,7 +1693,6 @@ GenerateConnectionsJSON (ClientInfo *cinfo, char **connectionlist, char *path)
       tcinfo->rxpackets[0], tcinfo->rxpacketrate, tcinfo->rxbytes[0], tcinfo->rxbyterate,
       (double)MS_HPTIME2EPOCH ((hpnow - tcinfo->lastxchange))
      );
-    lprintf (0, "connection: %s", conninfo);
 
     // Append, delimit with comma if not first element
     AddToString (connectionlist, conninfo, selectedcount==0 ? "" : "," , 0, 8388608);
