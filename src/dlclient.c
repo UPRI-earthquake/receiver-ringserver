@@ -1131,6 +1131,7 @@ HandleWrite (ClientInfo *cinfo)
   pcre_extra *match_extra = NULL;
   int pcre_result = 0;
   uint8_t found_match = 0;
+  uint8_t drop_packet = 0;
 
   if (!cinfo)
     return -1;
@@ -1196,13 +1197,7 @@ HandleWrite (ClientInfo *cinfo)
   }
   else
   {
-      lprintf (1, "[%s] %s: Dropping packet. Client not authorized to WRITE on streamid: %s, pcre_result: %d",
-               cinfo->hostname, WRITE_STREAM_UNAUTHORIZED_ERROR_STR, streamid, pcre_result);
-      snprintf (replystr, sizeof (replystr), "%s(%d): Dropping packet. You are not authorized to WRITE on %s",
-          WRITE_STREAM_UNAUTHORIZED_ERROR_STR, WRITE_STREAM_UNAUTHORIZED_ERROR, streamid);
-      SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
-
-      return 0; // Ignore packet, don't disconnect
+      drop_packet = 1;  // We'll receive the data-packet but won't write it and we won't disconnect
   }
 
   /* Copy the stream ID */
@@ -1231,6 +1226,19 @@ HandleWrite (ClientInfo *cinfo)
 
   if (nread < 0)
     return -1;
+
+  /* Drop packet if unauthorized to write on this stream */ 
+  if (drop_packet)
+  {
+      lprintf (1, "[%s] %s: Dropping packet. Client not authorized to WRITE on streamid: %s",
+               cinfo->hostname, WRITE_STREAM_UNAUTHORIZED_ERROR_STR, streamid);
+      snprintf (replystr, sizeof (replystr), "%s(%d): Dropping packet. You are not authorized to WRITE on %s",
+          WRITE_STREAM_UNAUTHORIZED_ERROR_STR, WRITE_STREAM_UNAUTHORIZED_ERROR, streamid);
+      if (SendPacket (cinfo, "ERROR", replystr, 0, 1, 1))
+        return -1;
+
+      return 0; // don't disconnect
+  }
 
   /* Write received miniSEED to a disk archive if configured */
   if (cinfo->mswrite)
