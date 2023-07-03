@@ -930,6 +930,16 @@ HandleNegotiation (ClientInfo *cinfo)
         return -1;
       }
 
+      //TODO: Get these from AuthServer response
+      cinfo->username = (char*)malloc( (strlen("username")+1) * sizeof(char) );
+      cinfo->role = (char*)malloc( (strlen("role")+1) * sizeof(char) );
+      if (cinfo->username == NULL || cinfo->role == NULL) {
+        lprintf (0, "[%s] Error allocating memory for username & role", cinfo->hostname);
+      }
+      strcpy(cinfo->username, "username");
+      strcpy(cinfo->role, "role");
+      lprintf(1, "username = %s, role = %s", cinfo->username, cinfo->role);
+
       lprintf(1, "[%s] Number of streamIds %zu", cinfo->hostname, num_streams);
       cinfo->writepatterns_str = (char**)malloc(num_streams * sizeof(char*));
       cinfo->writepatterns = (pcre**)malloc(num_streams * sizeof(pcre*));

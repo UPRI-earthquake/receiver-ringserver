@@ -28,6 +28,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "clients.h"
 #include "dlclient.h"
@@ -45,6 +46,7 @@ static int ParseHeader (char *header, char **value);
 static int GenerateStreams (ClientInfo *cinfo, char **streamlist, char *path, int idsonly);
 static int GenerateStatus (ClientInfo *cinfo, char **status);
 static int GenerateConnections (ClientInfo *cinfo, char **connectionlist, char *path);
+static int GenerateConnectionsJSON (ClientInfo *cinfo, char **connectionlist, char *path);
 static int SendFileHTTP (ClientInfo *cinfo, char *path);
 static int NegotiateWebSocket (ClientInfo *cinfo, char *version,
                                char *upgradeHeader, char *connectionHeader,
@@ -446,6 +448,85 @@ HandleHTTP (char *recvbuffer, ClientInfo *cinfo)
 
     return (rv) ? -1 : 0;
   } /* Done with /connections request */
+  else if (!strncasecmp (path, "/sse-connections", 16))
+  {
+    /* Check for trusted flag, required to access this resource */
+    if (!cinfo->trusted)
+    {
+      lprintf (1, "[%s] HTTP SSE-CONNECTIONS request from un-trusted client",
+               cinfo->hostname);
+
+      /* Create header */
+      headlen = snprintf (cinfo->sendbuf, cinfo->sendbuflen,
+                          "HTTP/1.1 403 Forbidden, no soup for you!\r\n"
+                          "Connection: close\r\n"
+                          "%s"
+                          "\r\n",
+                          (cinfo->httpheaders) ? cinfo->httpheaders : "");
+
+      rv = SendData (cinfo, cinfo->sendbuf, MIN (headlen, cinfo->sendbuflen));
+
+      return (rv) ? -1 : 1;
+    }
+
+    lprintf (1, "[%s] Received HTTP SSE-CONNECTIONSSSE request", cinfo->hostname);
+
+    /* Create header */
+    headlen = snprintf (cinfo->sendbuf, cinfo->sendbuflen,
+                        "HTTP/1.1 200\r\n"
+                        "Content-Type: text/event-stream\r\n"
+                        "Cache-Control: no-cache\r\n"
+                        "\r\n");
+
+    if (headlen <= 0)
+    {
+      lprintf (0, "Error creating response SSE header (SSE-CONNECTIONS request)");
+      rv = -1;
+    }
+
+    /* Send header */
+    rv = SendDataMB (cinfo,
+                     (void *[]){cinfo->sendbuf},
+                     (size_t[]){MIN (headlen, cinfo->sendbuflen)},
+                     1);
+
+    while (1)
+    {
+
+      /* Create response */
+      responsebytes = GenerateConnectionsJSON (cinfo, &response, path);
+
+      if (responsebytes <= 0)
+      {
+        lprintf (0, "[%s] Error generating connections list", cinfo->hostname);
+
+        if (response)
+          free (response);
+        return -1;
+      }
+
+      /* Send response */
+      rv = SendDataMB (cinfo,
+                       (void *[]){response},
+                       (size_t[]){(response) ? responsebytes : 0},
+                       1);
+
+      if (response)
+      {
+        free (response);
+        response = NULL;
+      }
+
+      if (rv < 0 ){ // when send() has failed (ie when client disconnected)
+        return -1;
+      }
+
+      sleep(3); // refresh status every 3 seconds
+    }
+
+
+    return (rv) ? -1 : 0;
+  } /* Done with /connection-status request */
   else if (!strncasecmp (path, "/seedlink", 9))
   {
     if ((cinfo->protocols & PROTO_SEEDLINK) == 0)
@@ -1457,6 +1538,187 @@ GenerateConnections (ClientInfo *cinfo, char **connectionlist, char *path)
 
   return (*connectionlist) ? strlen (*connectionlist) : 0;
 } /* End of GenerateConnections() */
+
+/***************************************************************************
+ * GenerateConnectionsJSON:
+ *
+ * Generate connection array of json-objs and place into buffer, which will be allocated
+ * to the length needed and should be free'd by the caller.
+ *
+ * Check for 'match' parameter in 'path' and use value as a regular
+ * expression to match against stream identifiers.
+ *
+ * Returns length of connection list response in bytes on sucess and -1 on error.
+ ***************************************************************************/
+static int
+GenerateConnectionsJSON (ClientInfo *cinfo, char **connectionlist, char *path)
+{
+  struct cthread *loopctp;
+  ClientInfo *tcinfo;
+  hptime_t hpnow;
+  int totalcount = 0;
+  int selectedcount = 0;
+  char conninfo[1024];
+  char *conntype;
+  char conntime[50];
+  char timenow[50];
+  char packettime[50];
+  char datastart[50];
+  char dataend[50];
+  char lagstr[5];
+
+  char matchstr[50];
+  char *cp;
+  int matchlen = 0;
+  pcre *match = 0;
+  const char *errptr;
+  int erroffset;
+
+  if (!cinfo || !connectionlist || !path)
+    return -1;
+
+  /* If match parameter is supplied, set reader match to limit streams */
+  if ((cp = strstr (path, "match=")))
+  {
+    cp += 6; /* Advance to character after '=' */
+
+    /* Copy parameter value into matchstr, stop at terminator, '&' or max length */
+    for (matchlen = 0; *cp && *cp != '&' && matchlen < sizeof (matchstr); cp++, matchlen++)
+    {
+      matchstr[matchlen] = *cp;
+    }
+    matchstr[matchlen] = '\0';
+
+    if (matchlen > 0 && cinfo->reader)
+    {
+      RingMatch (cinfo->reader, matchstr);
+    }
+  }
+
+  /* Compile match expression supplied with request */
+  if (matchlen > 0)
+  {
+    match = pcre_compile (matchstr, 0, &errptr, &erroffset, NULL);
+    if (errptr)
+    {
+      lprintf (0, "[%s] Error with pcre_compile: %s", cinfo->hostname, errptr);
+      matchlen = 0;
+    }
+  }
+
+  /* Get current time */
+  hpnow = HPnow ();
+
+  /* Initialize JSON string */
+  AddToString (connectionlist, "{\"connections\": [", "", 0, 8388608);
+
+  /* List connections, lock client list while looping */
+  pthread_mutex_lock (&cthreads_lock);
+  loopctp = cthreads;
+  while (loopctp)
+  {
+    /* Skip if client thread is not in ACTIVE state */
+    if (!(loopctp->td->td_flags & TDF_ACTIVE))
+    {
+      loopctp = loopctp->next;
+      continue;
+    }
+
+    totalcount++;
+    tcinfo = (ClientInfo *)loopctp->td->td_prvtptr;
+
+    /* Check matching expression against the client address string (host:port) and client ID */
+    if (match)
+      if (pcre_exec (match, NULL, tcinfo->hostname, strlen (tcinfo->hostname), 0, 0, NULL, 0) &&
+          pcre_exec (match, NULL, tcinfo->ipstr, strlen (tcinfo->ipstr), 0, 0, NULL, 0) &&
+          pcre_exec (match, NULL, tcinfo->clientid, strlen (tcinfo->clientid), 0, 0, NULL, 0))
+      {
+        loopctp = loopctp->next;
+        continue;
+      }
+
+    /* Determine connection type */
+    if (tcinfo->type == CLIENT_DATALINK)
+    {
+      if (tcinfo->websocket)
+        conntype = "WebSocket DataLink";
+      else
+        conntype = "DataLink";
+    }
+    else if (tcinfo->type == CLIENT_SEEDLINK)
+    {
+      if (tcinfo->websocket)
+        conntype = "WebSocket SeedLink";
+      else
+        conntype = "SeedLink";
+    }
+    else
+    {
+      conntype = "Unknown";
+    }
+
+    ms_hptime2mdtimestr (tcinfo->conntime, conntime, 1);
+    ms_hptime2mdtimestr (tcinfo->reader->pkttime, packettime, 1);
+    ms_hptime2mdtimestr (tcinfo->reader->datastart, datastart, 1);
+    ms_hptime2mdtimestr (tcinfo->reader->dataend, dataend, 1);
+
+    if (tcinfo->reader->pktid <= 0)
+      strncpy (lagstr, "-", sizeof (lagstr));
+    else
+      snprintf (lagstr, sizeof (lagstr), "%d%%", tcinfo->percentlag);
+
+    snprintf (conninfo, sizeof (conninfo),
+      "{"
+          "\"protocol\": \"%s\","
+          "\"connection_time\": \"%s\","
+          "\"hostname\": \"%s\","
+          "\"username\": \"%s\","
+          "\"role\": \"%s\","
+
+          "\"stream_id\": \"%s\","
+          "\"stream_count\": \"%d\","
+
+          "\"num_rx_packets\": \"%" PRId64 "\","
+          "\"rx_packets_per_sec\": \"%.1f\","
+          "\"num_rx_bytes\": \"%" PRId64 "\","
+          "\"rx_bytes_per_sec\": \"%.1f\","
+
+          "\"lag_ms\": \"%.1f\""
+      "}",
+      conntype, conntime, tcinfo->hostname, 
+      tcinfo->username ? tcinfo->username : "none", 
+      tcinfo->role ? tcinfo->role : "none", 
+      tcinfo->writepatterns_str ? tcinfo->writepatterns_str[0] : "none", 
+      tcinfo->streamscount,
+      tcinfo->rxpackets[0], tcinfo->rxpacketrate, tcinfo->rxbytes[0], tcinfo->rxbyterate,
+      (double)MS_HPTIME2EPOCH ((hpnow - tcinfo->lastxchange))
+     );
+
+    // Append, delimit with comma if not first element
+    AddToString (connectionlist, conninfo, selectedcount==0 ? "" : "," , 0, 8388608);
+
+    selectedcount++;
+    loopctp = loopctp->next;
+  } // end of list loop
+  pthread_mutex_unlock (&cthreads_lock);
+
+  /* End the JSON string properly */
+  ms_hptime2mdtimestr (hpnow, timenow, 1);
+  snprintf (conninfo, sizeof (conninfo),
+            "],"
+            "\"time\": \"%s\","
+            "\"num_selected_connections\": \"%d\","
+            "\"total_num_connections\": \"%d\""
+            "}",
+            timenow, selectedcount, totalcount);
+  AddToString (connectionlist, conninfo, "", 0, 8388608);
+
+  /* Free compiled match expression */
+  if (match)
+    pcre_free (match);
+
+  return (*connectionlist) ? strlen (*connectionlist) : 0;
+} /* End of GenerateConnectionsJSON() */
 
 /***************************************************************************
  * SendFileHTTP:
