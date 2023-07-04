@@ -49,7 +49,8 @@
 #include "rbtree.h"
 #include "ring.h"
 #include "ringserver.h"
-#include "response_codes.h"
+#include "authserver_response_codes.h"
+#include "ringserver_response_codes.h"
 
 /* Define the number of no-action loops that trigger the throttle */
 #define THROTTLE_TRIGGER 10
@@ -200,9 +201,14 @@ DLHandleCmd (ClientInfo *cinfo)
      */
     if (!cinfo->authorized)
     {
-      lprintf (1, "[%s] WRITE_ERR: Data packet received from client without write permission",
-               cinfo->hostname);
-      SendPacket (cinfo, "ERROR", "WRITE_ERR: Write permission not granted, missing token", 0, 1, 1);
+      char replystr[200];
+
+      lprintf (1, "[%s] %s: Data packet received from client without write permission",
+          cinfo->hostname, WRITE_UNAUTHORIZED_ERROR_STR);
+      snprintf (replystr, sizeof (replystr), "%s(%d): Write request not granted, no token provided",
+          WRITE_UNAUTHORIZED_ERROR_STR, WRITE_UNAUTHORIZED_ERROR);
+      SendPacket (cinfo, "ERROR",replystr, 0, 1, 1);
+
       return -1;
     }
     /* Any errors from HandleWrite are fatal */
@@ -698,7 +704,10 @@ HandleNegotiation (ClientInfo *cinfo)
     /* Make sure we got a single pattern or no pattern */
     if (fields > 1)
     {
-      if (SendPacket (cinfo, "ERROR", "AUTHORIZATION requires a single argument", 0, 1, 1)){
+      lprintf (0, "[%s] %s: AUTHORIZATION requires a single argument", cinfo->hostname, AUTH_FORMAT_ERROR_STR);
+      snprintf (sendbuffer, sizeof (sendbuffer), "%s(%d): AUTHORIZATION requires a single argument",
+                AUTH_FORMAT_ERROR_STR, AUTH_FORMAT_ERROR);
+      if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1)){
         return -1;
       } else {
         return 0; // means negotiation completed (we've responded)
@@ -708,10 +717,9 @@ HandleNegotiation (ClientInfo *cinfo)
     /* Check received token size */
     if (size > DLMAXREGEXLEN)
     {
-      lprintf (0, "[%s] AUTH_ERR: Authorization token too large (%)", cinfo->hostname, size);
-
-      snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_ERR: Authorization token too large, must be <= %d",
-                DLMAXREGEXLEN);
+      lprintf (0, "[%s] %s: Authorization token too large (%d)", cinfo->hostname, AUTH_TOKEN_SIZE_ERROR_STR, size);
+      snprintf (sendbuffer, sizeof (sendbuffer), "%s(%d): Authorization token too large (%d), must be <= %d",
+                AUTH_TOKEN_SIZE_ERROR_STR, AUTH_TOKEN_SIZE_ERROR, size, DLMAXREGEXLEN);
       if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1)) {
         return -1;
       } else {
@@ -722,10 +730,11 @@ HandleNegotiation (ClientInfo *cinfo)
     /* Check if AuthServer is configured */
     if ( ! authserver)
     {
-      lprintf (0, "[%s] AUTH_ERR: Cannot authorize for write, AuthServer not configured", cinfo->hostname);
+      lprintf (0, "[%s] %s: Cannot authorize for write, AuthServer-setting not configured", cinfo->hostname, AUTH_INTERNAL_ERROR_STR);
 
       snprintf (sendbuffer, sizeof (sendbuffer),
-          "[%s] AUTH_ERR: cannot authorize for write, AuthServer not configured", cinfo->hostname);
+          "%s(%d): Cannot authorize for write, RingServer not properly configured",
+          AUTH_INTERNAL_ERROR_STR, AUTH_INTERNAL_ERROR);
       if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1)) {
         return -1;
       } else {
@@ -736,10 +745,11 @@ HandleNegotiation (ClientInfo *cinfo)
     /* Check if BearerToken is configured */
     if (! authdir)
     {
-      lprintf (0, "[%s] AUTH_ERR: Cannot authorize for write, BearerToken not configured", cinfo->hostname);
+      lprintf (0, "[%s] %s: Cannot authorize for write, BearerToken-setting not configured", cinfo->hostname, AUTH_INTERNAL_ERROR_STR);
 
       snprintf (sendbuffer, sizeof (sendbuffer),
-          "[%s] AUTH_ERR: cannot authorize for write, BearerToken not configured", cinfo->hostname);
+          "%s(%d): Cannot authorize for write, RingServer not properly configured",
+          AUTH_INTERNAL_ERROR_STR, AUTH_INTERNAL_ERROR);
       if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1)) {
         return -1;
       } else {
@@ -782,7 +792,7 @@ HandleNegotiation (ClientInfo *cinfo)
     long file_size = ftell(fp);     // get current position of file pointer
     fseek(fp, 0, SEEK_SET);         // putback cursor to 0 offset from start
     if (file_size > DLMAXREGEXLEN){
-      lprintf (0, "[%s] Token in authdir/secret.key is too large: %d",
+      lprintf (0, "[%s] Token in authdir/secret.key is too large: %ld",
                cinfo->hostname, file_size);
       return -1;
     }
@@ -862,14 +872,14 @@ HandleNegotiation (ClientInfo *cinfo)
 
     // Check if parsing was successful
     if (jsonResponse == NULL) {
-      lprintf(0, "[%s] JSON parsing error: on line %d: %s\n", err.line, err.text);
+      lprintf(0, "[%s] JSON parsing error: on line %d: %s\n", cinfo->hostname, err.line, err.text);
       return -1;
     }
 
-    int response_code = json_integer_value(json_object_get(jsonResponse, "status"));
+    int authserver_response_code = json_integer_value(json_object_get(jsonResponse, "status"));
 
     int ret = 0;
-    if (response_code == INBEHALF_VERIFICATION_SUCCESS)
+    if (authserver_response_code == INBEHALF_VERIFICATION_SUCCESS)
     {
       // Get JSON components
       json_t *decodedSenderToken = json_object_get(jsonResponse, "decodedSenderToken");
@@ -920,6 +930,16 @@ HandleNegotiation (ClientInfo *cinfo)
         return -1;
       }
 
+      //TODO: Get these from AuthServer response
+      cinfo->username = (char*)malloc( (strlen("username")+1) * sizeof(char) );
+      cinfo->role = (char*)malloc( (strlen("role")+1) * sizeof(char) );
+      if (cinfo->username == NULL || cinfo->role == NULL) {
+        lprintf (0, "[%s] Error allocating memory for username & role", cinfo->hostname);
+      }
+      strcpy(cinfo->username, "username");
+      strcpy(cinfo->role, "role");
+      lprintf(1, "username = %s, role = %s", cinfo->username, cinfo->role);
+
       lprintf(1, "[%s] Number of streamIds %zu", cinfo->hostname, num_streams);
       cinfo->writepatterns_str = (char**)malloc(num_streams * sizeof(char*));
       cinfo->writepatterns = (pcre**)malloc(num_streams * sizeof(pcre*));
@@ -940,9 +960,12 @@ HandleNegotiation (ClientInfo *cinfo)
           const char *streamIdStr = json_string_value(streamId);
           pcre *pattern = pcre_compile (streamIdStr, 0, &errptr, &erroffset, NULL);
           if (errptr){
-            lprintf (0, "JWTToken: Error with pcre_compile: %s (offset: %d)", errptr, erroffset);
+            lprintf (0, "[%s] %s: Error with JWTToken & pcre_compile: %s (offset: %d)", cinfo->hostname,
+                AUTH_INTERNAL_ERROR_STR, errptr, erroffset);
+            snprintf (sendbuffer, sizeof (sendbuffer), "%s(%d): Internal error occured on RingServer",
+                AUTH_INTERNAL_ERROR_STR, AUTH_INTERNAL_ERROR);
 
-            if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Internal error occured", 0, 1, 1))
+            if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
               ret = -1;
 
             json_decref(streamIdsArray);
@@ -954,7 +977,7 @@ HandleNegotiation (ClientInfo *cinfo)
 
           size_t pattern_str_size = (strlen(streamIdStr)+1) * sizeof(char);
           if (pattern_str_size > DL_MAX_STREAMID_STR_LEN){
-            lprintf(0, "Length of streamId string (%s, %d) exceeded maximum: %zu",
+            lprintf(0, "Length of streamId string (%s, %lu) exceeded maximum: %d",
                 streamIdStr, pattern_str_size, DL_MAX_STREAMID_STR_LEN);
             json_decref(exp_ptr);
             json_decref(decodedSenderToken);
@@ -988,8 +1011,10 @@ HandleNegotiation (ClientInfo *cinfo)
       // Update write authority flag
       cinfo->authorized = 1;
 
-      lprintf (1, "[%s] AUTH_OK: Granted authorization to WRITE on streamIds", cinfo->hostname);
-      snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_OK: Granted authorization to WRITE on streamIds");
+      lprintf (1, "[%s] %s: Granted authorization to WRITE on streamIds", cinfo->hostname, AUTH_SUCCESS_STR);
+      snprintf (sendbuffer, sizeof (sendbuffer),
+          "%s(%d): Granted authorization to WRITE on streamIds",
+          AUTH_SUCCESS_STR, AUTH_SUCCESS);
 
       if (SendPacket (cinfo, "OK", sendbuffer, 0, 1, 1))
         ret = -1;
@@ -997,6 +1022,7 @@ HandleNegotiation (ClientInfo *cinfo)
       // Cleanup
       json_decref(decodedSenderToken);
     }
+#if 0 // This part will be removed once jwt's don't store streamids in them anymore
     else if (response_code == INBEHALF_VERIFICATION_SUCCESS_NEW_TOKEN)
     {
       //const char *accessToken = json_string_value(json_object_get(decodedSenderToken, "accessToken"));
@@ -1010,30 +1036,38 @@ HandleNegotiation (ClientInfo *cinfo)
 
       // TODO: Update bearertoken
     }
-    else if (response_code == INBEHALF_VERIFICATION_INVALID_TOKEN)
+#endif
+    else if (authserver_response_code == INBEHALF_VERIFICATION_INVALID_TOKEN)
     {
-      lprintf (0, "[%s] AUTH_ERR: Invalid token", cinfo->hostname);
-      if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Invalid token", 0, 1, 1))
+      lprintf (0, "[%s] %s: Sensor token invalid", cinfo->hostname, AUTH_INVALID_TOKEN_ERROR_STR);
+      snprintf (sendbuffer, sizeof (sendbuffer), "%s(%d): Sensor token invalid",
+          AUTH_INVALID_TOKEN_ERROR_STR, AUTH_INVALID_TOKEN_ERROR);
+      if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
         ret = -1;
     }
-    else if (response_code == INBEHALF_VERIFICATION_INVALID_ROLE)
+    else if (authserver_response_code == INBEHALF_VERIFICATION_INVALID_ROLE)
     {
-      lprintf (0, "[%s] AUTH_ERR: Role in token is invalid", cinfo->hostname);
-      if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Role in token is invalid", 0, 1, 1))
+      lprintf (0, "[%s] %s: Role in token invalid", cinfo->hostname, AUTH_ROLE_INVALID_ERROR_STR);
+      snprintf (sendbuffer, sizeof (sendbuffer), "%s(%d): Role in token invalid",
+          AUTH_ROLE_INVALID_ERROR_STR, AUTH_ROLE_INVALID_ERROR);
+      if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
         ret = -1;
     }
-    else if (response_code == INBEHALF_VERIFICATION_EXPIRED_TOKEN)
+    else if (authserver_response_code == INBEHALF_VERIFICATION_EXPIRED_TOKEN)
     {
-      lprintf (0, "[%s] AUTH_ERR: Expired token", cinfo->hostname);
-      if (SendPacket (cinfo, "ERROR", "AUTH_ERR: Expired token", 0, 1, 1))
+      lprintf (0, "[%s] %s: Expired sensor token", cinfo->hostname, AUTH_EXPIRED_TOKEN_ERROR_STR);
+      snprintf (sendbuffer, sizeof (sendbuffer), "%s(%d): Expired sensor token",
+          AUTH_EXPIRED_TOKEN_ERROR_STR, AUTH_EXPIRED_TOKEN_ERROR);
+      if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
         ret = -1;
     }
     else
     {
-      // TODO: Other cases such as the VERIFICATION cases for bearertoken
-      lprintf (0, "[%s] AUTH_ERR: Error requesting token verification from %s", cinfo->hostname, authserver);
-      snprintf (sendbuffer, sizeof (sendbuffer), "AUTH_ERR: Error requesting token verification from %s",
-          authserver);
+      // TODO: Specifically handle other cases such as the VERIFICATION cases for bearertoken
+      lprintf (0, "[%s] %s: Error code from AuthServer = %d", cinfo->hostname, AUTH_INTERNAL_ERROR_STR,
+          authserver_response_code);
+      snprintf (sendbuffer, sizeof (sendbuffer), "%s(%d): Internal error occured on RingServer",
+          AUTH_INTERNAL_ERROR_STR, AUTH_INTERNAL_ERROR);
       if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
         ret = -1;
     }
@@ -1097,6 +1131,7 @@ HandleWrite (ClientInfo *cinfo)
   pcre_extra *match_extra = NULL;
   int pcre_result = 0;
   uint8_t found_match = 0;
+  uint8_t drop_packet = 0;
 
   if (!cinfo)
     return -1;
@@ -1106,10 +1141,11 @@ HandleWrite (ClientInfo *cinfo)
               streamid, &(cinfo->packet.datastart), &(cinfo->packet.dataend),
               flags, &(cinfo->packet.datasize)) != 5)
   {
-    lprintf (1, "[%s] WRITE_ERR: Error parsing WRITE parameters: %.100s",
-             cinfo->hostname, cinfo->recvbuf);
-
-    SendPacket (cinfo, "ERROR", "WRITE_ERR: Error parsing WRITE command parameters", 0, 1, 1);
+    lprintf (1, "[%s] %s: Error parsing WRITE parameters: %.100s",
+             cinfo->hostname, WRITE_FORMAT_ERROR_STR, cinfo->recvbuf);
+    snprintf (replystr, sizeof (replystr), "%s(%d): Error parsing your WRITE command parameters",
+        WRITE_FORMAT_ERROR_STR, WRITE_FORMAT_ERROR);
+    SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
 
     return -1;
   }
@@ -1117,10 +1153,10 @@ HandleWrite (ClientInfo *cinfo)
   /* Check authority to WRITE on patterns*/
   if (!cinfo->writepatterns)
   {
-    lprintf (1, "[%s] WRITE_ERR: Client has no linked devices",
-             cinfo->hostname, streamid, pcre_result);
-
-    snprintf (replystr, sizeof (replystr), "WRITE_ERR: Client has no linked devices");
+    lprintf (1, "[%s] %s: Client has no linked devices, %s is not linked",
+             cinfo->hostname, WRITE_NO_DEVICE_ERROR_STR, streamid);
+    snprintf (replystr, sizeof (replystr), "%s(%d): You have no linked devices, %s is not linked",
+        WRITE_NO_DEVICE_ERROR_STR, WRITE_NO_DEVICE_ERROR, streamid);
     SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
 
     return -1;
@@ -1129,10 +1165,10 @@ HandleWrite (ClientInfo *cinfo)
   /* Check if token is expired */
   time_t currTime = time(NULL);
   if (currTime > cinfo->tokenExpiry) {
-    lprintf (1, "[%s] WRITE_ERR: Token expired: %d > %d",
-             cinfo->hostname, currTime, cinfo->tokenExpiry);
-
-    snprintf (replystr, sizeof (replystr), "WRITE_ERR: Token expired");
+    lprintf (1, "[%s] %s: Client token expired: %lu > %d",
+             cinfo->hostname, WRITE_EXPIRED_TOKEN_ERROR_STR, currTime, cinfo->tokenExpiry);
+    snprintf (replystr, sizeof (replystr), "%s(%d): Your token has expired",
+        WRITE_EXPIRED_TOKEN_ERROR_STR, WRITE_EXPIRED_TOKEN_ERROR);
     SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
     return -1;
   }
@@ -1161,13 +1197,7 @@ HandleWrite (ClientInfo *cinfo)
   }
   else
   {
-      lprintf (1, "[%s] WRITE_ERR: Token not authorized to WRITE streamid: %s, pcre_result: %d",
-               cinfo->hostname, streamid, pcre_result);
-
-      snprintf (replystr, sizeof (replystr), "WRITE_ERR: Token not authorized to WRITE on %s", streamid);
-      SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
-
-      return -1;
+      drop_packet = 1;  // We'll receive the data-packet but won't write it and we won't disconnect
   }
 
   /* Copy the stream ID */
@@ -1179,10 +1209,12 @@ HandleWrite (ClientInfo *cinfo)
   /* Make sure this packet data would fit into the ring */
   if (cinfo->packet.datasize > cinfo->ringparams->pktsize)
   {
-    lprintf (1, "[%s] Submitted packet size (%d) is greater than ring packet size (%d)",
-             cinfo->hostname, cinfo->packet.datasize, cinfo->ringparams->pktsize);
+    lprintf (1, "[%s] %s: Submitted packet size (%d) is greater than ring packet size (%d)",
+             cinfo->hostname, WRITE_LARGE_PACKET_ERROR_STR,
+             cinfo->packet.datasize, cinfo->ringparams->pktsize);
 
-    snprintf (replystr, sizeof (replystr), "Packet size (%d) is too large for ring, maximum is %d bytes",
+    snprintf (replystr, sizeof (replystr), "%s(%d): Packet size (%d) is too large for ring, maximum is %d bytes",
+              WRITE_LARGE_PACKET_ERROR_STR, WRITE_LARGE_PACKET_ERROR,
               cinfo->packet.datasize, cinfo->ringparams->pktsize);
     SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
 
@@ -1194,6 +1226,19 @@ HandleWrite (ClientInfo *cinfo)
 
   if (nread < 0)
     return -1;
+
+  /* Drop packet if unauthorized to write on this stream */ 
+  if (drop_packet)
+  {
+      lprintf (1, "[%s] %s: Dropping packet. Client not authorized to WRITE on streamid: %s",
+               cinfo->hostname, WRITE_STREAM_UNAUTHORIZED_ERROR_STR, streamid);
+      snprintf (replystr, sizeof (replystr), "%s(%d): Dropping packet. You are not authorized to WRITE on %s",
+          WRITE_STREAM_UNAUTHORIZED_ERROR_STR, WRITE_STREAM_UNAUTHORIZED_ERROR, streamid);
+      if (SendPacket (cinfo, "ERROR", replystr, 0, 1, 1))
+        return -1;
+
+      return 0; // don't disconnect
+  }
 
   /* Write received miniSEED to a disk archive if configured */
   if (cinfo->mswrite)
@@ -1220,8 +1265,9 @@ HandleWrite (ClientInfo *cinfo)
           if (ds_streamproc (cinfo->mswrite, msr, fn, cinfo->hostname))
           {
             lprintf (1, "[%s] Error writing miniSEED to disk", cinfo->hostname);
-
-            SendPacket (cinfo, "ERROR", "Error writing miniSEED to disk", 0, 1, 1);
+            snprintf (replystr, sizeof (replystr), "%s(%d): Error writing miniSEED to disk",
+                      WRITE_INTERNAL_ERROR_STR, WRITE_INTERNAL_ERROR);
+            SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
 
             return -1;
           }
@@ -1239,9 +1285,11 @@ HandleWrite (ClientInfo *cinfo)
     if (rv == -2)
       lprintf (1, "[%s] Error with RingWrite, corrupt ring, shutdown signalled", cinfo->hostname);
     else
-      lprintf (1, "[%s] Error with RingWrite", cinfo->hostname);
+      lprintf (1, "[%s] %s: Error with RingWrite", cinfo->hostname, WRITE_INTERNAL_ERROR_STR);
 
-    SendPacket (cinfo, "ERROR", "Error adding packet to ring", 0, 1, 1);
+    snprintf (replystr, sizeof (replystr), "%s(%d): Error adding packet to ring",
+              WRITE_INTERNAL_ERROR_STR, WRITE_INTERNAL_ERROR);
+    SendPacket (cinfo, "ERROR", replystr, 0, 1, 1);
 
     /* Set the shutdown signal if ring corruption was detected */
     if (rv == -2)
@@ -1278,7 +1326,9 @@ HandleWrite (ClientInfo *cinfo)
   /* Send acknowledgement if requested (flags contain 'A') */
   if (strchr (flags, 'A'))
   {
-    if (SendPacket (cinfo, "OK", "WRITE_OK: Packet written in server", cinfo->packet.pktid, 1, 1))
+    snprintf (replystr, sizeof (replystr), "%s(%d): Packet written in RingServer",
+              WRITE_SUCCESS_STR, WRITE_SUCCESS);
+    if (SendPacket (cinfo, "OK", replystr, cinfo->packet.pktid, 1, 1))
       return -1;
   }
 

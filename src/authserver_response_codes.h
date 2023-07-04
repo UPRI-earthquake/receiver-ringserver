@@ -1,5 +1,5 @@
-#ifndef RESPONSE_CODES_H
-#define RESPONSE_CODES_H
+#ifndef AUTHSERVER_RESPONSE_CODES_H
+#define AUTHSERVER_RESPONSE_CODES_H
 
 // Define constant integer values for response status codes
 #define GENERIC_SUCCESS                 0
@@ -58,4 +58,4 @@
 #define VERIFICATION_INVALID_ROLE_MSG       "Verification error: Invalid role in token"
 #define VERIFICATION_EXPIRED_TOKEN_MSG      "Verification error: Expired token"
 
-#endif  /* RESPONSE_CODES_H */
+#endif  /* AUTHSERVER_RESPONSE_CODES_H */

@@ -108,6 +108,8 @@ typedef struct ClientInfo_s {
   pcre       *writepattern; /* Array of auth-to-write-streamId regexes from JWT token */
   // end of TODO
   uint8_t    authorized;    /* Flag for authority to write, ie passed AUTHORIZATION command*/
+  char       *username;     /* Username of authenticated client*/
+  char       *role;         /* Role of authenticated client, sensor or brgy*/
   int        tokenExpiry;   /* Token expiration in seconds since epoch */
   pcre       **writepatterns; /* Array of auth-to-write-streamId regexes compiled from JWT token */
   char       **writepatterns_str; /* Array of auth-to-write-streamId regexes compiled from JWT token */
