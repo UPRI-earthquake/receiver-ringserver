@@ -935,12 +935,12 @@ HandleNegotiation (ClientInfo *cinfo)
       strncpy(
         cinfo->username, 
         json_string_value(username),
-        strlen( json_string_value(username) )
+        strlen( json_string_value(username) ) + 1
       );
       strncpy(
         cinfo->role,
         json_string_value(role),
-        strlen( json_string_value(role) )
+        strlen( json_string_value(role) ) + 1 
       );
       json_decref(username); // no more need for this
       json_decref(role);
@@ -999,17 +999,19 @@ HandleNegotiation (ClientInfo *cinfo)
             return ret;
           }
 
+          /*
           int patternSize = 0;
           pcre_fullinfo(pattern, NULL, PCRE_INFO_SIZE, &patternSize); // get size of pcre struct in bytes
           cinfo->writepatterns[cinfo->writepattern_count] = (pcre*)malloc(patternSize); // get a pointer to a block of size patternSize
-          lprintf(1, "Allocated writepatter[%d] addr=%p", cinfo->writepattern_count, cinfo->writepatterns[cinfo->writepattern_count]);
           if (cinfo->writepatterns[cinfo->writepattern_count] == NULL) {
             lprintf (0, "[%s] Error allocating writepattern[i] memory", cinfo->hostname);
             return -1;
               // TODO: Error handling for memory allocation failure
           }
           memcpy(cinfo->writepatterns[cinfo->writepattern_count], pattern, patternSize);
-          //cinfo->writepatterns[cinfo->writepattern_count] = pattern;
+          */
+          cinfo->writepatterns[cinfo->writepattern_count] = pattern;
+          lprintf(1, "Allocated writepattern[%d] addr=%p", cinfo->writepattern_count, cinfo->writepatterns[cinfo->writepattern_count]);
 
           // assign streamid_str to cinfo
           size_t pattern_str_size = (strlen(streamIdStr)+1) * sizeof(char);
@@ -1038,9 +1040,11 @@ HandleNegotiation (ClientInfo *cinfo)
       }
       // Cleanup
       json_decref(streamId);
+      lprintf(0, "CHECKING (1041): writepattern[1] = %p", cinfo->writepatterns[1]);
       json_decref(streamIdsArray);
-      json_decref(sensorInfo);
       lprintf(0, "CHECKING (1043): writepattern[1] = %p", cinfo->writepatterns[1]);
+      //json_decref(sensorInfo);
+      lprintf(0, "CHECKING (1045): writepattern[1] = %p", cinfo->writepatterns[1]);
 
       // Print stream IDs
       int i;
@@ -1098,8 +1102,8 @@ HandleNegotiation (ClientInfo *cinfo)
     }
 
     // Cleanup
-    lprintf(0, "CHECKING (1099): writepattern[1] = %p", cinfo->writepatterns[1]);
-    if(jsonResponse) json_decref(jsonResponse);
+    //if(jsonResponse) json_decref(jsonResponse);
+    lprintf(0, "CHECKING (1106): writepattern[1] = %p", cinfo->writepatterns[1]);
     return ret;
   }
 
