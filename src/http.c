@@ -1566,6 +1566,7 @@ GenerateConnectionsJSON (ClientInfo *cinfo, char **connectionlist, char *path)
   char datastart[50];
   char dataend[50];
   char lagstr[5];
+  char streamid[50];
 
   char matchstr[50];
   char *cp;
@@ -1675,27 +1676,34 @@ GenerateConnectionsJSON (ClientInfo *cinfo, char **connectionlist, char *path)
           "\"username\": \"%s\","
           "\"role\": \"%s\","
 
-          "\"stream_id\": \"%s\","
-          "\"stream_count\": \"%d\","
-
           "\"num_rx_packets\": \"%" PRId64 "\","
           "\"rx_packets_per_sec\": \"%.1f\","
           "\"num_rx_bytes\": \"%" PRId64 "\","
           "\"rx_bytes_per_sec\": \"%.1f\","
 
-          "\"lag_ms\": \"%.1f\""
-      "}",
+          "\"lag_ms\": \"%.1f\","
+
+          "\"stream_count\": \"%d\","
+          "\"stream_ids\": ["
+      ,
       conntype, conntime, tcinfo->hostname, 
       tcinfo->username ? tcinfo->username : "none", 
       tcinfo->role ? tcinfo->role : "none", 
-      tcinfo->writepatterns_str ? tcinfo->writepatterns_str[0] : "none", 
-      tcinfo->streamscount,
       tcinfo->rxpackets[0], tcinfo->rxpacketrate, tcinfo->rxbytes[0], tcinfo->rxbyterate,
-      (double)MS_HPTIME2EPOCH ((hpnow - tcinfo->lastxchange))
+      (double)MS_HPTIME2EPOCH ((hpnow - tcinfo->lastxchange)),
+      tcinfo->streamscount
      );
 
-    // Append, delimit with comma if not first element
+    // Append and prepend a comma if this isn't the first connection
     AddToString (connectionlist, conninfo, selectedcount==0 ? "" : "," , 0, 8388608);
+
+    // Add streamids as comma separated strings
+    for(size_t i=0; i < tcinfo->writepattern_count; i++){
+      snprintf(streamid, sizeof(streamid), "\"%s\"",tcinfo->writepatterns_str[i]);
+      AddToString (connectionlist, streamid, i==0 ? "" : "," , 0, 8388608);
+    }
+    AddToString (connectionlist, "]}", "" , 0, 8388608); // end the array of strings
+                                                         // for this connection
 
     selectedcount++;
     loopctp = loopctp->next;

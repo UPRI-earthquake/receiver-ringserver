@@ -978,7 +978,7 @@ HandleNegotiation (ClientInfo *cinfo)
         if (json_is_string(streamId))
         {
           // Compile pcre pattern from string, assign to cinfo
-          const char *streamIdStr = json_string_value(streamId);
+          const char *streamIdStr = json_string_value(streamId); // returns null terminated string
           pcre *pattern = pcre_compile (streamIdStr, 0, &errptr, &erroffset, NULL); // allocates automatically
           if (errptr){
             lprintf (0, "[%s] %s: Error with JWTToken & pcre_compile: %s (offset: %d)", cinfo->hostname,
