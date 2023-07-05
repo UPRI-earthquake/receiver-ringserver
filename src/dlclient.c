@@ -993,7 +993,6 @@ HandleNegotiation (ClientInfo *cinfo)
             return ret;
           }
           cinfo->writepatterns[cinfo->writepattern_count] = pattern;
-          lprintf(1, "Allocated writepattern[%d] addr=%p", cinfo->writepattern_count, cinfo->writepatterns[cinfo->writepattern_count]);
 
           // assign streamid_str to cinfo
           size_t pattern_str_size = (strlen(streamIdStr)+1) * sizeof(char);
@@ -1023,14 +1022,13 @@ HandleNegotiation (ClientInfo *cinfo)
       int i;
       lprintf(1, "[%s] Stream IDs:", cinfo->hostname);
       for (i = 0; i < cinfo->writepattern_count; i++) {
-        lprintf(1, "[%s] %s addr=%p", cinfo->hostname, cinfo->writepatterns_str[i], cinfo->writepatterns[i]);
+        lprintf(1, "[%s]    %s", cinfo->hostname, cinfo->writepatterns_str[i]);
       }
 
       // Update write authority flag
       cinfo->authorized = 1;
 
       // Respond
-      lprintf(0, "CHECKING (1052): writepattern[1] = %p", cinfo->writepatterns[1]);
       lprintf (1, "[%s] %s: Granted authorization to WRITE on streamIds", cinfo->hostname, AUTH_SUCCESS_STR);
       snprintf (sendbuffer, sizeof (sendbuffer),
           "%s(%d): Granted authorization to WRITE on streamIds",
