@@ -877,13 +877,24 @@ HandleNegotiation (ClientInfo *cinfo)
       return -1;
     }
 
-    int authserver_response_code = json_integer_value(json_object_get(jsonResponse, "status"));
+    // Get first layer of values (except "message")
+    json_t *status = json_object_get(jsonResponse, "status");
+    json_t *sensorInfo = json_object_get(jsonResponse, "sensorInfo");
+    if(
+      status == NULL         || ( !json_is_integer(status)  ) ||
+      sensorInfo == NULL     || ( !json_is_object(sensorInfo)  )
+    ) {
+      lprintf (0, "[%s] %s: Error parsing jsonResponse from AuthServer",
+          cinfo->hostname, AUTH_INTERNAL_ERROR_STR);
+      json_decref(jsonResponse);
+      return -1;
+    }
 
+    int authserver_response_code = json_integer_value(status);
     int ret = 0;
     if (authserver_response_code == INBEHALF_VERIFICATION_SUCCESS)
     {
       // Get JSON components
-      json_t *sensorInfo = json_object_get(jsonResponse, "sensorInfo");
       json_t *username = json_object_get(sensorInfo, "username");
       json_t *role = json_object_get(sensorInfo, "role");
       json_t *exp_ptr = json_object_get(sensorInfo, "tokenExp");
@@ -891,22 +902,16 @@ HandleNegotiation (ClientInfo *cinfo)
 
       // Check expected data types
       if(
-        sensorInfo == NULL     || ( !json_is_object(sensorInfo)  ) ||
         username == NULL       || ( !json_is_string(username)    ) ||
         role == NULL           || ( !json_is_string(role)        ) ||
         exp_ptr == NULL        || ( !json_is_integer(exp_ptr)    ) ||
         streamIdsArray == NULL || ( !json_is_array(streamIdsArray) )
       ) {
+        json_decref(jsonResponse); // freeing because of early return
+
         lprintf (0, "[%s] %s: Error parsing sensorInfo from AuthServer response",
             cinfo->hostname, AUTH_INTERNAL_ERROR_STR);
-
-        // freeing because of early return
-        if(sensorInfo)     json_decref(sensorInfo);
-        if(username)       json_decref(username);
-        if(role)           json_decref(role);
-        if(exp_ptr)        json_decref(exp_ptr);
-        if(streamIdsArray) json_decref(streamIdsArray);
-
+                                   //
         snprintf (sendbuffer, sizeof (sendbuffer), "%s(%d): RingServer encountered an error",
             AUTH_INTERNAL_ERROR_STR, AUTH_INTERNAL_ERROR);
         if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1)){
@@ -916,20 +921,12 @@ HandleNegotiation (ClientInfo *cinfo)
         }
       }
 
-      // Assign tokenExpiry to cinfo
-      cinfo->tokenExpiry = json_integer_value(exp_ptr);
-      lprintf(1, "[%s] Token expiration: %d", cinfo->hostname, cinfo->tokenExpiry);
-      json_decref(exp_ptr); // no more need for this
-
       //Assign username and role to cinfo
       cinfo->username = (char*)malloc( (strlen( json_string_value(username) )+1) );
       cinfo->role = (char*)malloc( (strlen( json_string_value(role) )+1) );
       if (cinfo->username == NULL || cinfo->role == NULL) {
         lprintf (0, "[%s] Error allocating memory for username & role", cinfo->hostname);
-        if(sensorInfo)     json_decref(sensorInfo);
-        if(username)       json_decref(username);
-        if(role)           json_decref(role);
-        if(streamIdsArray) json_decref(streamIdsArray);
+        json_decref(jsonResponse);
         return -1;
       }
       strncpy(
@@ -942,9 +939,12 @@ HandleNegotiation (ClientInfo *cinfo)
         json_string_value(role),
         strlen( json_string_value(role) ) + 1 
       );
-      json_decref(username); // no more need for this
-      json_decref(role);
-      lprintf(1, "username = %s, role = %s", cinfo->username, cinfo->role);
+      lprintf(1, "[%s] username = %s, role = %s", cinfo->hostname, cinfo->username, cinfo->role);
+
+      // Assign tokenExpiry to cinfo
+      cinfo->tokenExpiry = json_integer_value(exp_ptr);
+      lprintf(1, "[%s] Token expiration: %d", cinfo->hostname, cinfo->tokenExpiry);
+
 
       // Assign StreamIds str and pcre to cinfo
       // Iterate over the elements in the streamIds array
@@ -959,8 +959,6 @@ HandleNegotiation (ClientInfo *cinfo)
       if (num_streams > DL_MAX_NUM_STREAMID){
         lprintf(0, "Error number of streamIds (%zu) exceeded maximum: %d",
             num_streams, DL_MAX_NUM_STREAMID);
-        json_decref(streamIdsArray);
-        json_decref(sensorInfo);
         json_decref(jsonResponse);
         return -1;
       }
@@ -972,8 +970,6 @@ HandleNegotiation (ClientInfo *cinfo)
         // TODO: Properly handle the error if reallocation fails
         lprintf (0, "[%s] Error allocating memory", cinfo->hostname);
 
-        json_decref(streamIdsArray);
-        json_decref(sensorInfo);
         json_decref(jsonResponse);
         return -1;
       }
@@ -993,23 +989,9 @@ HandleNegotiation (ClientInfo *cinfo)
             if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1))
               ret = -1;
 
-            json_decref(streamIdsArray);
-            json_decref(sensorInfo);
             json_decref(jsonResponse);
             return ret;
           }
-
-          /*
-          int patternSize = 0;
-          pcre_fullinfo(pattern, NULL, PCRE_INFO_SIZE, &patternSize); // get size of pcre struct in bytes
-          cinfo->writepatterns[cinfo->writepattern_count] = (pcre*)malloc(patternSize); // get a pointer to a block of size patternSize
-          if (cinfo->writepatterns[cinfo->writepattern_count] == NULL) {
-            lprintf (0, "[%s] Error allocating writepattern[i] memory", cinfo->hostname);
-            return -1;
-              // TODO: Error handling for memory allocation failure
-          }
-          memcpy(cinfo->writepatterns[cinfo->writepattern_count], pattern, patternSize);
-          */
           cinfo->writepatterns[cinfo->writepattern_count] = pattern;
           lprintf(1, "Allocated writepattern[%d] addr=%p", cinfo->writepattern_count, cinfo->writepatterns[cinfo->writepattern_count]);
 
@@ -1032,19 +1014,10 @@ HandleNegotiation (ClientInfo *cinfo)
         {
           lprintf(0, "Invalid streamId at index %zu\n", index);
 
-          json_decref(streamIdsArray);
-          json_decref(sensorInfo);
           json_decref(jsonResponse);
           return -1;
         }
       }
-      // Cleanup
-      json_decref(streamId);
-      lprintf(0, "CHECKING (1041): writepattern[1] = %p", cinfo->writepatterns[1]);
-      json_decref(streamIdsArray);
-      lprintf(0, "CHECKING (1043): writepattern[1] = %p", cinfo->writepatterns[1]);
-      //json_decref(sensorInfo);
-      lprintf(0, "CHECKING (1045): writepattern[1] = %p", cinfo->writepatterns[1]);
 
       // Print stream IDs
       int i;
@@ -1056,15 +1029,14 @@ HandleNegotiation (ClientInfo *cinfo)
       // Update write authority flag
       cinfo->authorized = 1;
 
+      // Respond
       lprintf(0, "CHECKING (1052): writepattern[1] = %p", cinfo->writepatterns[1]);
       lprintf (1, "[%s] %s: Granted authorization to WRITE on streamIds", cinfo->hostname, AUTH_SUCCESS_STR);
       snprintf (sendbuffer, sizeof (sendbuffer),
           "%s(%d): Granted authorization to WRITE on streamIds",
           AUTH_SUCCESS_STR, AUTH_SUCCESS);
-
       if (SendPacket (cinfo, "OK", sendbuffer, 0, 1, 1))
         ret = -1;
-
     }
     else if (authserver_response_code == INBEHALF_VERIFICATION_INVALID_TOKEN)
     {
@@ -1102,8 +1074,7 @@ HandleNegotiation (ClientInfo *cinfo)
     }
 
     // Cleanup
-    //if(jsonResponse) json_decref(jsonResponse);
-    lprintf(0, "CHECKING (1106): writepattern[1] = %p", cinfo->writepatterns[1]);
+    json_decref(jsonResponse);
     return ret;
   }
 
