@@ -34,10 +34,11 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
-#include <curl/curl.h>
 
+#include <curl/curl.h>
 #include <libmseed.h>
 #include <mxml.h>
+#include <pcre.h>
 #include <jansson.h>
 
 #include "clients.h"
@@ -882,36 +883,70 @@ HandleNegotiation (ClientInfo *cinfo)
     if (authserver_response_code == INBEHALF_VERIFICATION_SUCCESS)
     {
       // Get JSON components
-      json_t *decodedSenderToken = json_object_get(jsonResponse, "decodedSenderToken");
-      json_t *exp_ptr = json_object_get(decodedSenderToken, "exp");
-      json_t *streamIdsArray = json_object_get(decodedSenderToken, "streamIds");
+      json_t *sensorInfo = json_object_get(jsonResponse, "sensorInfo");
+      json_t *username = json_object_get(sensorInfo, "username");
+      json_t *role = json_object_get(sensorInfo, "role");
+      json_t *exp_ptr = json_object_get(sensorInfo, "tokenExp");
+      json_t *streamIdsArray = json_object_get(sensorInfo, "streamIds"); // Array of strings
 
       // Check expected data types
-      if (exp_ptr == NULL || ( !json_is_integer(exp_ptr) )) {
-        // TODO: Handle this correctly, response with "ERROR" ?
-        // TODO: Refactor this code (maybe write this into a function) to avoid too much
+      if(
+        sensorInfo == NULL     || ( !json_is_object(sensorInfo)  ) ||
+        username == NULL       || ( !json_is_string(username)    ) ||
+        role == NULL           || ( !json_is_string(role)        ) ||
+        exp_ptr == NULL        || ( !json_is_integer(exp_ptr)    ) ||
+        streamIdsArray == NULL || ( !json_is_array(streamIdsArray) )
+      ) {
+        lprintf (0, "[%s] %s: Error parsing sensorInfo from AuthServer response",
+            cinfo->hostname, AUTH_INTERNAL_ERROR_STR);
+
         // freeing because of early return
-        lprintf(0, "Error parsing expiration from token");
-        json_decref(streamIdsArray);
-        json_decref(decodedSenderToken);
-        json_decref(jsonResponse);
-        return -1;
+        if(sensorInfo)     json_decref(sensorInfo);
+        if(username)       json_decref(username);
+        if(role)           json_decref(role);
+        if(exp_ptr)        json_decref(exp_ptr);
+        if(streamIdsArray) json_decref(streamIdsArray);
+
+        snprintf (sendbuffer, sizeof (sendbuffer), "%s(%d): RingServer encountered an error",
+            AUTH_INTERNAL_ERROR_STR, AUTH_INTERNAL_ERROR);
+        if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1)){
+          return -1;
+        }else{
+          return 0;
+        }
       }
 
-      if (streamIdsArray == NULL || ( !json_is_array(streamIdsArray) )) {
-        // TODO: Handle this correctly, response with "ERROR" ?
-        lprintf(0, "Error parsing streamIds from token");
-        json_decref(exp_ptr);
-        json_decref(decodedSenderToken);
-        json_decref(jsonResponse);
-        return -1;
-      }
-
-      // Assign to cinfo
+      // Assign tokenExpiry to cinfo
       cinfo->tokenExpiry = json_integer_value(exp_ptr);
       lprintf(1, "[%s] Token expiration: %d", cinfo->hostname, cinfo->tokenExpiry);
       json_decref(exp_ptr); // no more need for this
 
+      //Assign username and role to cinfo
+      cinfo->username = (char*)malloc( (strlen( json_string_value(username) )+1) );
+      cinfo->role = (char*)malloc( (strlen( json_string_value(role) )+1) );
+      if (cinfo->username == NULL || cinfo->role == NULL) {
+        lprintf (0, "[%s] Error allocating memory for username & role", cinfo->hostname);
+        if(sensorInfo)     json_decref(sensorInfo);
+        if(username)       json_decref(username);
+        if(role)           json_decref(role);
+        if(streamIdsArray) json_decref(streamIdsArray);
+        return -1;
+      }
+      strncpy(
+        cinfo->username, 
+        json_string_value(username),
+        strlen( json_string_value(username) )
+      );
+      strncpy(
+        cinfo->role,
+        json_string_value(role),
+        strlen( json_string_value(role) )
+      );
+      json_decref(username); // no more need for this
+      json_decref(role);
+      lprintf(1, "username = %s, role = %s", cinfo->username, cinfo->role);
+
+      // Assign StreamIds str and pcre to cinfo
       // Iterate over the elements in the streamIds array
       size_t index;
       json_t *streamId;
@@ -924,21 +959,11 @@ HandleNegotiation (ClientInfo *cinfo)
       if (num_streams > DL_MAX_NUM_STREAMID){
         lprintf(0, "Error number of streamIds (%zu) exceeded maximum: %d",
             num_streams, DL_MAX_NUM_STREAMID);
-        json_decref(exp_ptr);
-        json_decref(decodedSenderToken);
+        json_decref(streamIdsArray);
+        json_decref(sensorInfo);
         json_decref(jsonResponse);
         return -1;
       }
-
-      //TODO: Get these from AuthServer response
-      cinfo->username = (char*)malloc( (strlen("username")+1) * sizeof(char) );
-      cinfo->role = (char*)malloc( (strlen("role")+1) * sizeof(char) );
-      if (cinfo->username == NULL || cinfo->role == NULL) {
-        lprintf (0, "[%s] Error allocating memory for username & role", cinfo->hostname);
-      }
-      strcpy(cinfo->username, "username");
-      strcpy(cinfo->role, "role");
-      lprintf(1, "username = %s, role = %s", cinfo->username, cinfo->role);
 
       lprintf(1, "[%s] Number of streamIds %zu", cinfo->hostname, num_streams);
       cinfo->writepatterns_str = (char**)malloc(num_streams * sizeof(char*));
@@ -948,7 +973,7 @@ HandleNegotiation (ClientInfo *cinfo)
         lprintf (0, "[%s] Error allocating memory", cinfo->hostname);
 
         json_decref(streamIdsArray);
-        json_decref(decodedSenderToken);
+        json_decref(sensorInfo);
         json_decref(jsonResponse);
         return -1;
       }
@@ -956,9 +981,9 @@ HandleNegotiation (ClientInfo *cinfo)
       json_array_foreach(streamIdsArray, index, streamId) {
         if (json_is_string(streamId))
         {
-          // Compile pcre pattern from string
+          // Compile pcre pattern from string, assign to cinfo
           const char *streamIdStr = json_string_value(streamId);
-          pcre *pattern = pcre_compile (streamIdStr, 0, &errptr, &erroffset, NULL);
+          pcre *pattern = pcre_compile (streamIdStr, 0, &errptr, &erroffset, NULL); // allocates automatically
           if (errptr){
             lprintf (0, "[%s] %s: Error with JWTToken & pcre_compile: %s (offset: %d)", cinfo->hostname,
                 AUTH_INTERNAL_ERROR_STR, errptr, erroffset);
@@ -969,18 +994,30 @@ HandleNegotiation (ClientInfo *cinfo)
               ret = -1;
 
             json_decref(streamIdsArray);
-            json_decref(decodedSenderToken);
+            json_decref(sensorInfo);
             json_decref(jsonResponse);
             return ret;
           }
-          cinfo->writepatterns[cinfo->writepattern_count] = pattern;
 
+          int patternSize = 0;
+          pcre_fullinfo(pattern, NULL, PCRE_INFO_SIZE, &patternSize); // get size of pcre struct in bytes
+          cinfo->writepatterns[cinfo->writepattern_count] = (pcre*)malloc(patternSize); // get a pointer to a block of size patternSize
+          lprintf(1, "Allocated writepatter[%d] addr=%p", cinfo->writepattern_count, cinfo->writepatterns[cinfo->writepattern_count]);
+          if (cinfo->writepatterns[cinfo->writepattern_count] == NULL) {
+            lprintf (0, "[%s] Error allocating writepattern[i] memory", cinfo->hostname);
+            return -1;
+              // TODO: Error handling for memory allocation failure
+          }
+          memcpy(cinfo->writepatterns[cinfo->writepattern_count], pattern, patternSize);
+          //cinfo->writepatterns[cinfo->writepattern_count] = pattern;
+
+          // assign streamid_str to cinfo
           size_t pattern_str_size = (strlen(streamIdStr)+1) * sizeof(char);
           if (pattern_str_size > DL_MAX_STREAMID_STR_LEN){
             lprintf(0, "Length of streamId string (%s, %lu) exceeded maximum: %d",
                 streamIdStr, pattern_str_size, DL_MAX_STREAMID_STR_LEN);
             json_decref(exp_ptr);
-            json_decref(decodedSenderToken);
+            json_decref(sensorInfo);
             json_decref(jsonResponse);
             return -1;
           }
@@ -994,23 +1031,28 @@ HandleNegotiation (ClientInfo *cinfo)
           lprintf(0, "Invalid streamId at index %zu\n", index);
 
           json_decref(streamIdsArray);
-          json_decref(decodedSenderToken);
+          json_decref(sensorInfo);
           json_decref(jsonResponse);
           return -1;
         }
       }
+      // Cleanup
+      json_decref(streamId);
       json_decref(streamIdsArray);
+      json_decref(sensorInfo);
+      lprintf(0, "CHECKING (1043): writepattern[1] = %p", cinfo->writepatterns[1]);
 
       // Print stream IDs
       int i;
       lprintf(1, "[%s] Stream IDs:", cinfo->hostname);
       for (i = 0; i < cinfo->writepattern_count; i++) {
-        lprintf(1, "[%s]    %s", cinfo->hostname, cinfo->writepatterns_str[i]);
+        lprintf(1, "[%s] %s addr=%p", cinfo->hostname, cinfo->writepatterns_str[i], cinfo->writepatterns[i]);
       }
 
       // Update write authority flag
       cinfo->authorized = 1;
 
+      lprintf(0, "CHECKING (1052): writepattern[1] = %p", cinfo->writepatterns[1]);
       lprintf (1, "[%s] %s: Granted authorization to WRITE on streamIds", cinfo->hostname, AUTH_SUCCESS_STR);
       snprintf (sendbuffer, sizeof (sendbuffer),
           "%s(%d): Granted authorization to WRITE on streamIds",
@@ -1019,24 +1061,7 @@ HandleNegotiation (ClientInfo *cinfo)
       if (SendPacket (cinfo, "OK", sendbuffer, 0, 1, 1))
         ret = -1;
 
-      // Cleanup
-      json_decref(decodedSenderToken);
     }
-#if 0 // This part will be removed once jwt's don't store streamids in them anymore
-    else if (response_code == INBEHALF_VERIFICATION_SUCCESS_NEW_TOKEN)
-    {
-      //const char *accessToken = json_string_value(json_object_get(decodedSenderToken, "accessToken"));
-      lprintf (1, "[%s] AUTH_OK: Granted authorization to WRITE on streamIds, added to list of devices", cinfo->hostname);
-      snprintf (sendbuffer, sizeof (sendbuffer),
-          "AUTH_OK: Granted authorization to WRITE on streamIds, added to list of devices");
-      // TODO: add to jwttoken and writepattern
-
-      if (SendPacket (cinfo, "OK", sendbuffer, 0, 1, 1))
-        ret = -1;
-
-      // TODO: Update bearertoken
-    }
-#endif
     else if (authserver_response_code == INBEHALF_VERIFICATION_INVALID_TOKEN)
     {
       lprintf (0, "[%s] %s: Sensor token invalid", cinfo->hostname, AUTH_INVALID_TOKEN_ERROR_STR);
@@ -1073,7 +1098,8 @@ HandleNegotiation (ClientInfo *cinfo)
     }
 
     // Cleanup
-    json_decref(jsonResponse);
+    lprintf(0, "CHECKING (1099): writepattern[1] = %p", cinfo->writepatterns[1]);
+    if(jsonResponse) json_decref(jsonResponse);
     return ret;
   }
 

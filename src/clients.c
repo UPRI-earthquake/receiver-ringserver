@@ -31,6 +31,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <pcre.h>
 
 #include "ringserver.h"
 #include "clients.h"
@@ -403,6 +404,8 @@ ClientThread (void *arg)
     }
   } /* End of main client loop */
 
+  lprintf(0, "CHECKING (407): writepattern[1] = %p", cinfo->writepatterns[1]);
+
   /* Set thread CLOSING status, locking entire client list */
   pthread_mutex_lock (&cthreads_lock);
   mytdp->td_flags = TDF_CLOSING;
@@ -423,6 +426,7 @@ ClientThread (void *arg)
     WriteTLog (cinfo, 1);
   }
 
+  lprintf(0, "CHECKING (429): writepattern[1] = %p", cinfo->writepatterns[1]);
   /* Release match, reject and selectors strings */
   if (cinfo->matchstr)
     free (cinfo->matchstr);
@@ -447,23 +451,36 @@ ClientThread (void *arg)
     cinfo->authorized = 0;
     cinfo->tokenExpiry = 0;
   }
+  lprintf(0, "CHECKING (454): writepattern[1] = %p", cinfo->writepatterns[1]);
   if (cinfo->username){
+    lprintf(0, "username %s will be freed", cinfo->username);
     free(cinfo->username);
   }
   if (cinfo->role){
+    lprintf(0, "role %s will be freed", cinfo->role);
+    lprintf(0, "CHECKING: writepattern[1] = %p", cinfo->writepatterns[1]);
     free(cinfo->role);
   }
   if (cinfo->writepatterns){
     for(int i=0; i < cinfo->writepattern_count; i++){
-      pcre_free (cinfo->writepatterns[i]); // free each pattern in array
+      if(cinfo->writepatterns[i]){
+        lprintf(0, "writepattern[ %d ] = %p will be freed", i, cinfo->writepatterns[i]);
+        lprintf(0, "writepattern[ %d ] = %p will be freed next", i+1, cinfo->writepatterns[i+1]);
+        pcre_free (cinfo->writepatterns[i]); // free each pattern in array
+      }
     }
     free(cinfo->writepatterns); // free pointer to arry
+    lprintf(0, "writepatterns freed");
   }
   if (cinfo->writepatterns_str){
     for(int i=0; i < cinfo->writepattern_count; i++){
-      free (cinfo->writepatterns_str[i]); // free each string in array
+      if(cinfo->writepatterns_str[i]){
+        free (cinfo->writepatterns_str[i]); // free each string in array
+        lprintf(0, "writepattern_str[ %d ] freed", i);
+      }
     }
     free (cinfo->writepatterns_str); // free via pointer to array block
+    lprintf(0, "writepatterns_str freed");
   }
 
 
@@ -482,9 +499,13 @@ ClientThread (void *arg)
   if (cinfo->packetdata)
     free (cinfo->packetdata);
 
+
+  lprintf(0, "sendbuf, recvbuf, packetdata freed");
+
   /* Release client socket structure */
   if (cinfo->addr){
     free (cinfo->addr);
+    lprintf(0, "addr freed");
   }
 
   /* Shutdown and release miniSEED write data stream */
@@ -493,6 +514,7 @@ ClientThread (void *arg)
     ds_streamproc (cinfo->mswrite, NULL, NULL, cinfo->hostname);
     free (cinfo->mswrite);
     cinfo->mswrite = 0;
+    lprintf(0, "mswrite freed");
   }
 
   if (cinfo->type == CLIENT_SEEDLINK && cinfo->extinfo)
