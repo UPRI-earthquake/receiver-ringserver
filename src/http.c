@@ -1511,7 +1511,7 @@ GenerateStreamsSSE (ClientInfo *cinfo, char **streamlist, char *path, int idsonl
   ms_hptime2mdtimestr (hpnow, timenow, 1);
   snprintf (streaminfo, sizeof (streaminfo),
             "],"
-            "\"time\": \"%s\""
+            "\"current_time\": \"%s\""
             "}\n\n",
             timenow);
   AddToString (streamlist, streaminfo, "", 0, 8388608);
@@ -2035,7 +2035,7 @@ GenerateConnectionsSSE (ClientInfo *cinfo, char **connectionlist, char *path)
   ms_hptime2mdtimestr (hpnow, timenow, 1);
   snprintf (conninfo, sizeof (conninfo),
             "],"
-            "\"time\": \"%s\","
+            "\"current_time\": \"%s\","
             "\"num_selected_connections\": \"%d\","
             "\"total_num_connections\": \"%d\""
             "}\n\n",
