@@ -324,6 +324,86 @@ HandleHTTP (char *recvbuffer, ClientInfo *cinfo)
 
     return (rv) ? -1 : 0;
   } /* Done with /streams or /streamids request */
+  else if (!strncasecmp (path, "/sse-streams", 8))
+  {
+    /* Check for trusted flag, required to access this resource */
+    if (!cinfo->trusted)
+    {
+      lprintf (1, "[%s] HTTP SSE-STREAMS request from un-trusted client",
+               cinfo->hostname);
+
+      /* Create header */
+      headlen = snprintf (cinfo->sendbuf, cinfo->sendbuflen,
+                          "HTTP/1.1 403 Forbidden, no soup for you!\r\n"
+                          "Connection: close\r\n"
+                          "%s"
+                          "\r\n",
+                          (cinfo->httpheaders) ? cinfo->httpheaders : "");
+
+      rv = SendData (cinfo, cinfo->sendbuf, MIN (headlen, cinfo->sendbuflen));
+
+      return (rv) ? -1 : 1;
+    }
+
+    lprintf (1, "[%s] Received HTTP SSE-STREAMS request", cinfo->hostname);
+
+    /* Create header */
+    headlen = snprintf (cinfo->sendbuf, cinfo->sendbuflen,
+                        "HTTP/1.1 200\r\n"
+                        "Content-Type: text/event-stream\r\n"
+                        "Cache-Control: no-cache\r\n"
+                        "\r\n");
+
+    if (headlen <= 0)
+    {
+      lprintf (0, "Error creating response SSE header (SSE-CONNECTIONS request)");
+      rv = -1;
+    }
+
+    /* Send header */
+    rv = SendDataMB (cinfo,
+                     (void *[]){cinfo->sendbuf},
+                     (size_t[]){MIN (headlen, cinfo->sendbuflen)},
+                     1);
+
+    // Keep connection alive, send event every 3 seconds
+    while (1)
+    {
+      /* Create response */
+      /* Generate stream list with or without time extents for /streams versus /streamids */
+      responsebytes = GenerateStreams (cinfo, &response, path, 0);
+
+      if (responsebytes < 0)
+      {
+        lprintf (0, "[%s] Error generating stream list", cinfo->hostname);
+
+        if (response)
+          free (response);
+        return -1;
+      }
+
+      /* Send response */
+      rv = SendDataMB (cinfo,
+                       (void *[]){response},
+                       (size_t[]){(response) ? responsebytes : 0},
+                       1);
+
+      if (response)
+      {
+        free (response);
+        response = NULL;
+      }
+
+      if (rv < 0 ){ // when send() has failed (ie when client disconnected)
+        return -1;
+      }
+
+      sleep(3); // refresh status every 3 seconds
+    }
+
+    return (rv) ? -1 : 0;
+
+  } /* Done with /streams or /streamids request */
   else if (!strcasecmp (path, "/status"))
   {
     /* Check for trusted flag, required to access this resource */
@@ -490,9 +570,9 @@ HandleHTTP (char *recvbuffer, ClientInfo *cinfo)
                      (size_t[]){MIN (headlen, cinfo->sendbuflen)},
                      1);
 
+    // Keep connection alive, send event every 3 seconds
     while (1)
     {
-
       /* Create response */
       responsebytes = GenerateConnectionsSSE (cinfo, &response, path);
 
@@ -523,7 +603,6 @@ HandleHTTP (char *recvbuffer, ClientInfo *cinfo)
 
       sleep(3); // refresh status every 3 seconds
     }
-
 
     return (rv) ? -1 : 0;
   } /* Done with /connection-status request */
