@@ -1311,7 +1311,6 @@ GenerateStreamsSSE (ClientInfo *cinfo, char **streamlist, char *path, int idsonl
   Stack *streams;
   StackNode *streamnode;
   RingStream *ringstream;
-  hptime_t hpnow;
   char timenow[50];
   int streamcount;
   size_t streamlistsize;
@@ -1391,55 +1390,6 @@ GenerateStreamsSSE (ClientInfo *cinfo, char **streamlist, char *path, int idsonl
   /* Collect stream list and send a line for each stream */
   if ((streams = GetStreamsStack (cinfo->ringparams, cinfo->reader)))
   {
-#if 0
-    /* Count streams */
-    streamcount = 0;
-    streamnode = streams->top;
-    while (streamnode)
-    {
-      streamcount++;
-      streamnode = streamnode->next;
-    }
-    /* Allocate stream list buffer with maximum expected:
-       maximum per entry is 60 (streamid) + 2x25 (time strings) plus (2) braces, (4)commas, (2*3)quotation marks, (3)colons 
-       and length of the json keys per entry.
-     */
-    streamlistsize = 60 + 50 + 2 + 4 + 2*3 + 3;
-    streamlistsize += strlen(streamid_key) + strlen(earliestdstime_key) + strlen(latestdetime_key);
-    streamlistsize *= streamcount;
-
-    if (!(*streamlist = (char *)malloc (streamlistsize)))
-    {
-      lprintf (0, "[%s] Error for HTTP STREAMS (cannot allocate response buffer of size %zu)",
-               cinfo->hostname, streamlistsize);
-
-      StackDestroy (streams, free);
-
-      /* Create and send error response */
-      headlen = snprintf (cinfo->sendbuf, cinfo->sendbuflen,
-                          "HTTP/1.1 500 Internal error, cannot allocate response buffer\r\n"
-                          "Connection: close\r\n"
-                          "%s"
-                          "\r\n"
-                          "Cannot allocate response buffer of %zu bytes",
-                          (cinfo->httpheaders) ? cinfo->httpheaders : "",
-                          streamlistsize);
-
-      if (headlen > 0)
-      {
-        SendData (cinfo, cinfo->sendbuf, MIN (headlen, cinfo->sendbuflen));
-      }
-      else
-      {
-        lprintf (0, "Error creating response (cannot allocate stream list buffer)");
-      }
-
-      return -1;
-    }
-
-    /* Set write pointer to beginning of buffer */
-    cp = *streamlist;
-#endif
     streamcount=0;
 
     while ((ringstream = (RingStream *)StackPop (streams)))
@@ -1460,44 +1410,6 @@ GenerateStreamsSSE (ClientInfo *cinfo, char **streamlist, char *path, int idsonl
 
       /* Append streaminfo entry to buffer */
       AddToString (streamlist, streaminfo, streamcount==0 ? "" : "," , 0, 8388608);
-#if 0
-      streaminfolen = strlen (streaminfo);
-      if ((streamlistsize - (cp - *streamlist)) > streaminfolen)
-      {
-        memcpy (cp, streaminfo, streaminfolen);
-        cp += streaminfolen;
-      }
-      else
-      {
-        lprintf (0, "[%s] Error for HTTP SSE-STREAMS (cannot allocate response buffer of size %zu)",
-                 cinfo->hostname, streamlistsize);
-
-        free (ringstream);
-        StackDestroy (streams, free);
-
-        /* Create and send error response */
-        headlen = snprintf (cinfo->sendbuf, cinfo->sendbuflen,
-                            "HTTP/1.1 500 Internal error, stream list buffer too small\r\n"
-                            "Connection: close\r\n"
-                            "%s"
-                            "\r\n"
-                            "Stream list buffer too small: %zu bytes for %d streams",
-                            (cinfo->httpheaders) ? cinfo->httpheaders : "",
-                            streamlistsize,
-                            streamcount);
-
-        if (headlen > 0)
-        {
-          SendData (cinfo, cinfo->sendbuf, MIN (headlen, cinfo->sendbuflen));
-        }
-        else
-        {
-          lprintf (0, "Error creating response (stream list buffer too small)");
-        }
-
-        return -1;
-      }
-#endif
 
       streamcount++;
       free (ringstream);
@@ -1508,17 +1420,13 @@ GenerateStreamsSSE (ClientInfo *cinfo, char **streamlist, char *path, int idsonl
   }
 
   /* End the JSON string properly */
-  ms_hptime2mdtimestr (hpnow, timenow, 1);
+  ms_hptime2mdtimestr (HPnow(), timenow, 1);
   snprintf (streaminfo, sizeof (streaminfo),
             "],"
             "\"current_time\": \"%s\""
             "}\n\n",
             timenow);
   AddToString (streamlist, streaminfo, "", 0, 8388608);
-
-
-  /* Add a final terminator to stream list buffer */
-  //*cp = '\0';
 
   /* Clear match expression if set for this request */
   if (matchlen > 0 && cinfo->reader)
