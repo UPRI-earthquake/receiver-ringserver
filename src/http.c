@@ -44,6 +44,7 @@
 
 static int ParseHeader (char *header, char **value);
 static int GenerateStreams (ClientInfo *cinfo, char **streamlist, char *path, int idsonly);
+static int GenerateStreamsSSE (ClientInfo *cinfo, char **streamlist, char *path, int idsonly);
 static int GenerateStatus (ClientInfo *cinfo, char **status);
 static int GenerateConnections (ClientInfo *cinfo, char **connectionlist, char *path);
 static int GenerateConnectionsSSE (ClientInfo *cinfo, char **connectionlist, char *path);
@@ -371,7 +372,7 @@ HandleHTTP (char *recvbuffer, ClientInfo *cinfo)
     {
       /* Create response */
       /* Generate stream list with or without time extents for /streams versus /streamids */
-      responsebytes = GenerateStreams (cinfo, &response, path, 0);
+      responsebytes = GenerateStreamsSSE (cinfo, &response, path, 0);
 
       if (responsebytes < 0)
       {
@@ -1289,6 +1290,244 @@ GenerateStreams (ClientInfo *cinfo, char **streamlist, char *path, int idsonly)
 
   return (*streamlist) ? strlen (*streamlist) : 0;
 } /* End of GenerateStreams() */
+
+/***************************************************************************
+ * GenerateStreamsSSE:
+ *
+ * Generate stream list and place into buffer, which will be allocated
+ * to the length needed and should be free'd by the caller.
+ *
+ * If 'timeextents' is true the earliest and latest times will be
+ * included in the output.  For now this only works when level > 0.
+ *
+ * Check for 'match' parameter in 'path' and use value as a regular
+ * expression to match against stream identifiers.
+ *
+ * Returns length of stream list response in bytes on success and -1 on error.
+ ***************************************************************************/
+static int
+GenerateStreamsSSE (ClientInfo *cinfo, char **streamlist, char *path, int idsonly)
+{
+  Stack *streams;
+  StackNode *streamnode;
+  RingStream *ringstream;
+  hptime_t hpnow;
+  char timenow[50];
+  int streamcount;
+  size_t streamlistsize;
+  size_t headlen;
+  size_t streaminfolen;
+  const char* streamid_key = "stream_id";
+  const char* latestdetime_key = "latest_data_end_time";
+  const char* earliestdstime_key = "earliest_data_start_time";
+  char earliest[50];
+  char latest[50];
+
+  /* Allocate memory for each JSON object entry in stream list
+     maximum per entry is 60 (streamid) + 2x25 (time strings) plus (2) braces, (3)commas, (2*3)quotation marks, (3)colons 
+     and length of the json keys per entry
+     and null terminator.
+   */
+  int streaminfosize = 0;
+  streaminfosize += 60 + 2*25 + 2 + 3 + 2*3 + 3;
+  streaminfosize += strlen(streamid_key) + strlen(earliestdstime_key) + strlen(latestdetime_key);
+  streaminfosize += 1;
+
+  char streaminfo[streaminfosize];
+  char matchstr[50];
+  char *cp;
+  int matchlen = 0;
+
+
+  if (!cinfo || !streamlist || !path)
+    return -1;
+
+  /* If match parameter is supplied, set reader match to limit streams */
+  if ((cp = strstr (path, "match=")))
+  {
+    cp += 6; /* Advance to character after '=' */
+
+    /* Copy parameter value into matchstr, stop at terminator, '&' or max length */
+    for (matchlen = 0; *cp != '\0' && *cp != '&' && matchlen < sizeof (matchstr); cp++, matchlen++)
+    {
+      matchstr[matchlen] = *cp;
+    }
+    matchstr[matchlen] = '\0';
+
+    if (matchlen > 0 && cinfo->reader)
+    {
+      if (RingMatch (cinfo->reader, matchstr))
+      {
+        /* Create and send error response */
+        headlen = snprintf (cinfo->sendbuf, cinfo->sendbuflen,
+                            "HTTP/1.1 400 Invalid match expression\r\n"
+                            "Connection: close\r\n"
+                            "%s"
+                            "\r\n"
+                            "Invalid match expression: '%s'",
+                            (cinfo->httpheaders) ? cinfo->httpheaders : "",
+                            matchstr);
+
+        if (headlen > 0)
+        {
+          SendData (cinfo, cinfo->sendbuf, MIN (headlen, cinfo->sendbuflen));
+        }
+        else
+        {
+          lprintf (0, "Error creating response (invalid match expression)");
+        }
+
+        return -1;
+      }
+    }
+  }
+
+  /* Initialize JSON string */
+  AddToString (streamlist,
+      "event: ringserver-streamids-status\n"
+      "data: {\"stream_ids\": ["
+      , "", 0, 8388608);
+
+  /* Collect stream list and send a line for each stream */
+  if ((streams = GetStreamsStack (cinfo->ringparams, cinfo->reader)))
+  {
+#if 0
+    /* Count streams */
+    streamcount = 0;
+    streamnode = streams->top;
+    while (streamnode)
+    {
+      streamcount++;
+      streamnode = streamnode->next;
+    }
+    /* Allocate stream list buffer with maximum expected:
+       maximum per entry is 60 (streamid) + 2x25 (time strings) plus (2) braces, (4)commas, (2*3)quotation marks, (3)colons 
+       and length of the json keys per entry.
+     */
+    streamlistsize = 60 + 50 + 2 + 4 + 2*3 + 3;
+    streamlistsize += strlen(streamid_key) + strlen(earliestdstime_key) + strlen(latestdetime_key);
+    streamlistsize *= streamcount;
+
+    if (!(*streamlist = (char *)malloc (streamlistsize)))
+    {
+      lprintf (0, "[%s] Error for HTTP STREAMS (cannot allocate response buffer of size %zu)",
+               cinfo->hostname, streamlistsize);
+
+      StackDestroy (streams, free);
+
+      /* Create and send error response */
+      headlen = snprintf (cinfo->sendbuf, cinfo->sendbuflen,
+                          "HTTP/1.1 500 Internal error, cannot allocate response buffer\r\n"
+                          "Connection: close\r\n"
+                          "%s"
+                          "\r\n"
+                          "Cannot allocate response buffer of %zu bytes",
+                          (cinfo->httpheaders) ? cinfo->httpheaders : "",
+                          streamlistsize);
+
+      if (headlen > 0)
+      {
+        SendData (cinfo, cinfo->sendbuf, MIN (headlen, cinfo->sendbuflen));
+      }
+      else
+      {
+        lprintf (0, "Error creating response (cannot allocate stream list buffer)");
+      }
+
+      return -1;
+    }
+
+    /* Set write pointer to beginning of buffer */
+    cp = *streamlist;
+#endif
+    streamcount=0;
+
+    while ((ringstream = (RingStream *)StackPop (streams)))
+    {
+      ms_hptime2isotimestr (ringstream->earliestdstime, earliest, 1);
+      ms_hptime2isotimestr (ringstream->latestdetime, latest, 1);
+
+      snprintf (streaminfo, sizeof (streaminfo), 
+          "{"
+          "\"%s\":\"%s\","  
+          "\"%s\":\"%sZ\","
+          "\"%s\":\"%sZ\""
+          "}",
+          streamid_key, ringstream->streamid,
+          earliestdstime_key, earliest, 
+          latestdetime_key, latest);
+      streaminfo[sizeof (streaminfo) - 1] = '\0';
+
+      /* Append streaminfo entry to buffer */
+      AddToString (streamlist, streaminfo, streamcount==0 ? "" : "," , 0, 8388608);
+#if 0
+      streaminfolen = strlen (streaminfo);
+      if ((streamlistsize - (cp - *streamlist)) > streaminfolen)
+      {
+        memcpy (cp, streaminfo, streaminfolen);
+        cp += streaminfolen;
+      }
+      else
+      {
+        lprintf (0, "[%s] Error for HTTP SSE-STREAMS (cannot allocate response buffer of size %zu)",
+                 cinfo->hostname, streamlistsize);
+
+        free (ringstream);
+        StackDestroy (streams, free);
+
+        /* Create and send error response */
+        headlen = snprintf (cinfo->sendbuf, cinfo->sendbuflen,
+                            "HTTP/1.1 500 Internal error, stream list buffer too small\r\n"
+                            "Connection: close\r\n"
+                            "%s"
+                            "\r\n"
+                            "Stream list buffer too small: %zu bytes for %d streams",
+                            (cinfo->httpheaders) ? cinfo->httpheaders : "",
+                            streamlistsize,
+                            streamcount);
+
+        if (headlen > 0)
+        {
+          SendData (cinfo, cinfo->sendbuf, MIN (headlen, cinfo->sendbuflen));
+        }
+        else
+        {
+          lprintf (0, "Error creating response (stream list buffer too small)");
+        }
+
+        return -1;
+      }
+#endif
+
+      streamcount++;
+      free (ringstream);
+    }
+
+    /* Cleanup stream stack */
+    StackDestroy (streams, free);
+  }
+
+  /* End the JSON string properly */
+  ms_hptime2mdtimestr (hpnow, timenow, 1);
+  snprintf (streaminfo, sizeof (streaminfo),
+            "],"
+            "\"time\": \"%s\""
+            "}\n\n",
+            timenow);
+  AddToString (streamlist, streaminfo, "", 0, 8388608);
+
+
+  /* Add a final terminator to stream list buffer */
+  //*cp = '\0';
+
+  /* Clear match expression if set for this request */
+  if (matchlen > 0 && cinfo->reader)
+  {
+    RingMatch (cinfo->reader, NULL);
+  }
+
+  return (*streamlist) ? strlen (*streamlist) : 0;
+} /* End of GenerateStreamsSSE() */
 
 /***************************************************************************
  * GenerateStatus:
