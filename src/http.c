@@ -46,7 +46,7 @@ static int ParseHeader (char *header, char **value);
 static int GenerateStreams (ClientInfo *cinfo, char **streamlist, char *path, int idsonly);
 static int GenerateStatus (ClientInfo *cinfo, char **status);
 static int GenerateConnections (ClientInfo *cinfo, char **connectionlist, char *path);
-static int GenerateConnectionsJSON (ClientInfo *cinfo, char **connectionlist, char *path);
+static int GenerateConnectionsSSE (ClientInfo *cinfo, char **connectionlist, char *path);
 static int SendFileHTTP (ClientInfo *cinfo, char *path);
 static int NegotiateWebSocket (ClientInfo *cinfo, char *version,
                                char *upgradeHeader, char *connectionHeader,
@@ -469,7 +469,7 @@ HandleHTTP (char *recvbuffer, ClientInfo *cinfo)
       return (rv) ? -1 : 1;
     }
 
-    lprintf (1, "[%s] Received HTTP SSE-CONNECTIONSSSE request", cinfo->hostname);
+    lprintf (1, "[%s] Received HTTP SSE-CONNECTIONS request", cinfo->hostname);
 
     /* Create header */
     headlen = snprintf (cinfo->sendbuf, cinfo->sendbuflen,
@@ -494,7 +494,7 @@ HandleHTTP (char *recvbuffer, ClientInfo *cinfo)
     {
 
       /* Create response */
-      responsebytes = GenerateConnectionsJSON (cinfo, &response, path);
+      responsebytes = GenerateConnectionsSSE (cinfo, &response, path);
 
       if (responsebytes <= 0)
       {
@@ -1540,10 +1540,10 @@ GenerateConnections (ClientInfo *cinfo, char **connectionlist, char *path)
 } /* End of GenerateConnections() */
 
 /***************************************************************************
- * GenerateConnectionsJSON:
+ * GenerateConnectionsSSE:
  *
- * Generate connection array of json-objs and place into buffer, which will be allocated
- * to the length needed and should be free'd by the caller.
+ * Generate connection array of json-objs and place into buffer (in SSE format), 
+ * which will be allocated to the length needed and should be free'd by the caller.
  *
  * Check for 'match' parameter in 'path' and use value as a regular
  * expression to match against stream identifiers.
@@ -1551,7 +1551,7 @@ GenerateConnections (ClientInfo *cinfo, char **connectionlist, char *path)
  * Returns length of connection list response in bytes on sucess and -1 on error.
  ***************************************************************************/
 static int
-GenerateConnectionsJSON (ClientInfo *cinfo, char **connectionlist, char *path)
+GenerateConnectionsSSE (ClientInfo *cinfo, char **connectionlist, char *path)
 {
   struct cthread *loopctp;
   ClientInfo *tcinfo;
@@ -1611,7 +1611,10 @@ GenerateConnectionsJSON (ClientInfo *cinfo, char **connectionlist, char *path)
   hpnow = HPnow ();
 
   /* Initialize JSON string */
-  AddToString (connectionlist, "{\"connections\": [", "", 0, 8388608);
+  AddToString (connectionlist,
+      "event: ringserver-connections-status\n"
+      "data: {\"connections\": ["
+      , "", 0, 8388608);
 
   /* List connections, lock client list while looping */
   pthread_mutex_lock (&cthreads_lock);
@@ -1717,7 +1720,7 @@ GenerateConnectionsJSON (ClientInfo *cinfo, char **connectionlist, char *path)
             "\"time\": \"%s\","
             "\"num_selected_connections\": \"%d\","
             "\"total_num_connections\": \"%d\""
-            "}",
+            "}\n\n",
             timenow, selectedcount, totalcount);
   AddToString (connectionlist, conninfo, "", 0, 8388608);
 
@@ -1726,7 +1729,7 @@ GenerateConnectionsJSON (ClientInfo *cinfo, char **connectionlist, char *path)
     pcre_free (match);
 
   return (*connectionlist) ? strlen (*connectionlist) : 0;
-} /* End of GenerateConnectionsJSON() */
+} /* End of GenerateConnectionsSSE() */
 
 /***************************************************************************
  * SendFileHTTP:
