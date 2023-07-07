@@ -44,9 +44,10 @@
 
 static int ParseHeader (char *header, char **value);
 static int GenerateStreams (ClientInfo *cinfo, char **streamlist, char *path, int idsonly);
+static int GenerateStreamsSSE (ClientInfo *cinfo, char **streamlist, char *path, int idsonly);
 static int GenerateStatus (ClientInfo *cinfo, char **status);
 static int GenerateConnections (ClientInfo *cinfo, char **connectionlist, char *path);
-static int GenerateConnectionsJSON (ClientInfo *cinfo, char **connectionlist, char *path);
+static int GenerateConnectionsSSE (ClientInfo *cinfo, char **connectionlist, char *path);
 static int SendFileHTTP (ClientInfo *cinfo, char *path);
 static int NegotiateWebSocket (ClientInfo *cinfo, char *version,
                                char *upgradeHeader, char *connectionHeader,
@@ -324,6 +325,86 @@ HandleHTTP (char *recvbuffer, ClientInfo *cinfo)
 
     return (rv) ? -1 : 0;
   } /* Done with /streams or /streamids request */
+  else if (!strncasecmp (path, "/sse-streams", 8))
+  {
+    /* Check for trusted flag, required to access this resource */
+    if (!cinfo->trusted)
+    {
+      lprintf (1, "[%s] HTTP SSE-STREAMS request from un-trusted client",
+               cinfo->hostname);
+
+      /* Create header */
+      headlen = snprintf (cinfo->sendbuf, cinfo->sendbuflen,
+                          "HTTP/1.1 403 Forbidden, no soup for you!\r\n"
+                          "Connection: close\r\n"
+                          "%s"
+                          "\r\n",
+                          (cinfo->httpheaders) ? cinfo->httpheaders : "");
+
+      rv = SendData (cinfo, cinfo->sendbuf, MIN (headlen, cinfo->sendbuflen));
+
+      return (rv) ? -1 : 1;
+    }
+
+    lprintf (1, "[%s] Received HTTP SSE-STREAMS request", cinfo->hostname);
+
+    /* Create header */
+    headlen = snprintf (cinfo->sendbuf, cinfo->sendbuflen,
+                        "HTTP/1.1 200\r\n"
+                        "Content-Type: text/event-stream\r\n"
+                        "Cache-Control: no-cache\r\n"
+                        "\r\n");
+
+    if (headlen <= 0)
+    {
+      lprintf (0, "Error creating response SSE header (SSE-CONNECTIONS request)");
+      rv = -1;
+    }
+
+    /* Send header */
+    rv = SendDataMB (cinfo,
+                     (void *[]){cinfo->sendbuf},
+                     (size_t[]){MIN (headlen, cinfo->sendbuflen)},
+                     1);
+
+    // Keep connection alive, send event every 3 seconds
+    while (1)
+    {
+      /* Create response */
+      /* Generate stream list with or without time extents for /streams versus /streamids */
+      responsebytes = GenerateStreamsSSE (cinfo, &response, path, 0);
+
+      if (responsebytes < 0)
+      {
+        lprintf (0, "[%s] Error generating stream list", cinfo->hostname);
+
+        if (response)
+          free (response);
+        return -1;
+      }
+
+      /* Send response */
+      rv = SendDataMB (cinfo,
+                       (void *[]){response},
+                       (size_t[]){(response) ? responsebytes : 0},
+                       1);
+
+      if (response)
+      {
+        free (response);
+        response = NULL;
+      }
+
+      if (rv < 0 ){ // when send() has failed (ie when client disconnected)
+        return -1;
+      }
+
+      sleep(3); // refresh status every 3 seconds
+    }
+
+    return (rv) ? -1 : 0;
+
+  } /* Done with /streams or /streamids request */
   else if (!strcasecmp (path, "/status"))
   {
     /* Check for trusted flag, required to access this resource */
@@ -469,7 +550,7 @@ HandleHTTP (char *recvbuffer, ClientInfo *cinfo)
       return (rv) ? -1 : 1;
     }
 
-    lprintf (1, "[%s] Received HTTP SSE-CONNECTIONSSSE request", cinfo->hostname);
+    lprintf (1, "[%s] Received HTTP SSE-CONNECTIONS request", cinfo->hostname);
 
     /* Create header */
     headlen = snprintf (cinfo->sendbuf, cinfo->sendbuflen,
@@ -490,11 +571,11 @@ HandleHTTP (char *recvbuffer, ClientInfo *cinfo)
                      (size_t[]){MIN (headlen, cinfo->sendbuflen)},
                      1);
 
+    // Keep connection alive, send event every 3 seconds
     while (1)
     {
-
       /* Create response */
-      responsebytes = GenerateConnectionsJSON (cinfo, &response, path);
+      responsebytes = GenerateConnectionsSSE (cinfo, &response, path);
 
       if (responsebytes <= 0)
       {
@@ -523,7 +604,6 @@ HandleHTTP (char *recvbuffer, ClientInfo *cinfo)
 
       sleep(3); // refresh status every 3 seconds
     }
-
 
     return (rv) ? -1 : 0;
   } /* Done with /connection-status request */
@@ -1212,6 +1292,152 @@ GenerateStreams (ClientInfo *cinfo, char **streamlist, char *path, int idsonly)
 } /* End of GenerateStreams() */
 
 /***************************************************************************
+ * GenerateStreamsSSE:
+ *
+ * Generate stream list and place into buffer, which will be allocated
+ * to the length needed and should be free'd by the caller.
+ *
+ * If 'timeextents' is true the earliest and latest times will be
+ * included in the output.  For now this only works when level > 0.
+ *
+ * Check for 'match' parameter in 'path' and use value as a regular
+ * expression to match against stream identifiers.
+ *
+ * Returns length of stream list response in bytes on success and -1 on error.
+ ***************************************************************************/
+static int
+GenerateStreamsSSE (ClientInfo *cinfo, char **streamlist, char *path, int idsonly)
+{
+  Stack *streams;
+  StackNode *streamnode;
+  RingStream *ringstream;
+  char timenow[50];
+  int streamcount;
+  size_t streamlistsize;
+  size_t headlen;
+  size_t streaminfolen;
+  const char* streamid_key = "stream_id";
+  const char* latestdetime_key = "latest_data_end_time";
+  const char* earliestdstime_key = "earliest_data_start_time";
+  char earliest[50];
+  char latest[50];
+
+  /* Allocate memory for each JSON object entry in stream list
+     maximum per entry is 60 (streamid) + 2x25 (time strings) plus (2) braces, (3)commas, (2*3)quotation marks, (3)colons 
+     and length of the json keys per entry
+     and null terminator.
+   */
+  int streaminfosize = 0;
+  streaminfosize += 60 + 2*25 + 2 + 3 + 2*3 + 3;
+  streaminfosize += strlen(streamid_key) + strlen(earliestdstime_key) + strlen(latestdetime_key);
+  streaminfosize += 1;
+
+  char streaminfo[streaminfosize];
+  char matchstr[50];
+  char *cp;
+  int matchlen = 0;
+
+
+  if (!cinfo || !streamlist || !path)
+    return -1;
+
+  /* If match parameter is supplied, set reader match to limit streams */
+  if ((cp = strstr (path, "match=")))
+  {
+    cp += 6; /* Advance to character after '=' */
+
+    /* Copy parameter value into matchstr, stop at terminator, '&' or max length */
+    for (matchlen = 0; *cp != '\0' && *cp != '&' && matchlen < sizeof (matchstr); cp++, matchlen++)
+    {
+      matchstr[matchlen] = *cp;
+    }
+    matchstr[matchlen] = '\0';
+
+    if (matchlen > 0 && cinfo->reader)
+    {
+      if (RingMatch (cinfo->reader, matchstr))
+      {
+        /* Create and send error response */
+        headlen = snprintf (cinfo->sendbuf, cinfo->sendbuflen,
+                            "HTTP/1.1 400 Invalid match expression\r\n"
+                            "Connection: close\r\n"
+                            "%s"
+                            "\r\n"
+                            "Invalid match expression: '%s'",
+                            (cinfo->httpheaders) ? cinfo->httpheaders : "",
+                            matchstr);
+
+        if (headlen > 0)
+        {
+          SendData (cinfo, cinfo->sendbuf, MIN (headlen, cinfo->sendbuflen));
+        }
+        else
+        {
+          lprintf (0, "Error creating response (invalid match expression)");
+        }
+
+        return -1;
+      }
+    }
+  }
+
+  /* Initialize JSON string */
+  AddToString (streamlist,
+      "event: ringserver-streamids-status\n"
+      "data: {\"stream_ids\": ["
+      , "", 0, 8388608);
+
+  /* Collect stream list and send a line for each stream */
+  if ((streams = GetStreamsStack (cinfo->ringparams, cinfo->reader)))
+  {
+    streamcount=0;
+
+    while ((ringstream = (RingStream *)StackPop (streams)))
+    {
+      ms_hptime2isotimestr (ringstream->earliestdstime, earliest, 1);
+      ms_hptime2isotimestr (ringstream->latestdetime, latest, 1);
+
+      snprintf (streaminfo, sizeof (streaminfo), 
+          "{"
+          "\"%s\":\"%s\","  
+          "\"%s\":\"%sZ\","
+          "\"%s\":\"%sZ\""
+          "}",
+          streamid_key, ringstream->streamid,
+          earliestdstime_key, earliest, 
+          latestdetime_key, latest);
+      streaminfo[sizeof (streaminfo) - 1] = '\0';
+
+      /* Append streaminfo entry to buffer */
+      AddToString (streamlist, streaminfo, streamcount==0 ? "" : "," , 0, 8388608);
+
+      streamcount++;
+      free (ringstream);
+    }
+
+    /* Cleanup stream stack */
+    StackDestroy (streams, free);
+  }
+
+  /* End the JSON string properly */
+  ms_hptime2mdtimestr (HPnow(), timenow, 1);
+  snprintf (streaminfo, sizeof (streaminfo),
+            "],"
+            "\"current_time\": \"%s\""
+            "}\n\n",
+            timenow);
+  AddToString (streamlist, streaminfo, "", 0, 8388608);
+
+  /* Clear match expression if set for this request */
+  if (matchlen > 0 && cinfo->reader)
+  {
+    RingMatch (cinfo->reader, NULL);
+  }
+
+  return (*streamlist) ? strlen (*streamlist) : 0;
+} /* End of GenerateStreamsSSE() */
+
+/***************************************************************************
  * GenerateStatus:
  *
  * Generate server status and place into buffer, which will be
@@ -1540,10 +1766,10 @@ GenerateConnections (ClientInfo *cinfo, char **connectionlist, char *path)
 } /* End of GenerateConnections() */
 
 /***************************************************************************
- * GenerateConnectionsJSON:
+ * GenerateConnectionsSSE:
  *
- * Generate connection array of json-objs and place into buffer, which will be allocated
- * to the length needed and should be free'd by the caller.
+ * Generate connection array of json-objs and place into buffer (in SSE format), 
+ * which will be allocated to the length needed and should be free'd by the caller.
  *
  * Check for 'match' parameter in 'path' and use value as a regular
  * expression to match against stream identifiers.
@@ -1551,7 +1777,7 @@ GenerateConnections (ClientInfo *cinfo, char **connectionlist, char *path)
  * Returns length of connection list response in bytes on sucess and -1 on error.
  ***************************************************************************/
 static int
-GenerateConnectionsJSON (ClientInfo *cinfo, char **connectionlist, char *path)
+GenerateConnectionsSSE (ClientInfo *cinfo, char **connectionlist, char *path)
 {
   struct cthread *loopctp;
   ClientInfo *tcinfo;
@@ -1566,6 +1792,7 @@ GenerateConnectionsJSON (ClientInfo *cinfo, char **connectionlist, char *path)
   char datastart[50];
   char dataend[50];
   char lagstr[5];
+  char streamid[50];
 
   char matchstr[50];
   char *cp;
@@ -1610,7 +1837,10 @@ GenerateConnectionsJSON (ClientInfo *cinfo, char **connectionlist, char *path)
   hpnow = HPnow ();
 
   /* Initialize JSON string */
-  AddToString (connectionlist, "{\"connections\": [", "", 0, 8388608);
+  AddToString (connectionlist,
+      "event: ringserver-connections-status\n"
+      "data: {\"connections\": ["
+      , "", 0, 8388608);
 
   /* List connections, lock client list while looping */
   pthread_mutex_lock (&cthreads_lock);
@@ -1675,27 +1905,34 @@ GenerateConnectionsJSON (ClientInfo *cinfo, char **connectionlist, char *path)
           "\"username\": \"%s\","
           "\"role\": \"%s\","
 
-          "\"stream_id\": \"%s\","
-          "\"stream_count\": \"%d\","
-
           "\"num_rx_packets\": \"%" PRId64 "\","
           "\"rx_packets_per_sec\": \"%.1f\","
           "\"num_rx_bytes\": \"%" PRId64 "\","
           "\"rx_bytes_per_sec\": \"%.1f\","
 
-          "\"lag_ms\": \"%.1f\""
-      "}",
+          "\"lag_ms\": \"%.1f\","
+
+          "\"stream_count\": \"%d\","
+          "\"stream_ids\": ["
+      ,
       conntype, conntime, tcinfo->hostname, 
       tcinfo->username ? tcinfo->username : "none", 
       tcinfo->role ? tcinfo->role : "none", 
-      tcinfo->writepatterns_str ? tcinfo->writepatterns_str[0] : "none", 
-      tcinfo->streamscount,
       tcinfo->rxpackets[0], tcinfo->rxpacketrate, tcinfo->rxbytes[0], tcinfo->rxbyterate,
-      (double)MS_HPTIME2EPOCH ((hpnow - tcinfo->lastxchange))
+      (double)MS_HPTIME2EPOCH ((hpnow - tcinfo->lastxchange)),
+      tcinfo->streamscount
      );
 
-    // Append, delimit with comma if not first element
+    // Append and prepend a comma if this isn't the first connection
     AddToString (connectionlist, conninfo, selectedcount==0 ? "" : "," , 0, 8388608);
+
+    // Add streamids as comma separated strings
+    for(size_t i=0; i < tcinfo->writepattern_count; i++){
+      snprintf(streamid, sizeof(streamid), "\"%s\"",tcinfo->writepatterns_str[i]);
+      AddToString (connectionlist, streamid, i==0 ? "" : "," , 0, 8388608);
+    }
+    AddToString (connectionlist, "]}", "" , 0, 8388608); // end the array of strings
+                                                         // for this connection
 
     selectedcount++;
     loopctp = loopctp->next;
@@ -1706,10 +1943,10 @@ GenerateConnectionsJSON (ClientInfo *cinfo, char **connectionlist, char *path)
   ms_hptime2mdtimestr (hpnow, timenow, 1);
   snprintf (conninfo, sizeof (conninfo),
             "],"
-            "\"time\": \"%s\","
+            "\"current_time\": \"%s\","
             "\"num_selected_connections\": \"%d\","
             "\"total_num_connections\": \"%d\""
-            "}",
+            "}\n\n",
             timenow, selectedcount, totalcount);
   AddToString (connectionlist, conninfo, "", 0, 8388608);
 
@@ -1718,7 +1955,7 @@ GenerateConnectionsJSON (ClientInfo *cinfo, char **connectionlist, char *path)
     pcre_free (match);
 
   return (*connectionlist) ? strlen (*connectionlist) : 0;
-} /* End of GenerateConnectionsJSON() */
+} /* End of GenerateConnectionsSSE() */
 
 /***************************************************************************
  * SendFileHTTP:

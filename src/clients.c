@@ -31,6 +31,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <pcre.h>
 
 #include "ringserver.h"
 #include "clients.h"
@@ -403,6 +404,7 @@ ClientThread (void *arg)
     }
   } /* End of main client loop */
 
+
   /* Set thread CLOSING status, locking entire client list */
   pthread_mutex_lock (&cthreads_lock);
   mytdp->td_flags = TDF_CLOSING;
@@ -455,13 +457,17 @@ ClientThread (void *arg)
   }
   if (cinfo->writepatterns){
     for(int i=0; i < cinfo->writepattern_count; i++){
-      pcre_free (cinfo->writepatterns[i]); // free each pattern in array
+      if(cinfo->writepatterns[i]){
+        pcre_free (cinfo->writepatterns[i]); // free each pattern in array
+      }
     }
     free(cinfo->writepatterns); // free pointer to arry
   }
   if (cinfo->writepatterns_str){
     for(int i=0; i < cinfo->writepattern_count; i++){
-      free (cinfo->writepatterns_str[i]); // free each string in array
+      if(cinfo->writepatterns_str[i]){
+        free (cinfo->writepatterns_str[i]); // free each string in array
+      }
     }
     free (cinfo->writepatterns_str); // free via pointer to array block
   }
@@ -481,6 +487,7 @@ ClientThread (void *arg)
     free (cinfo->recvbuf);
   if (cinfo->packetdata)
     free (cinfo->packetdata);
+
 
   /* Release client socket structure */
   if (cinfo->addr){
