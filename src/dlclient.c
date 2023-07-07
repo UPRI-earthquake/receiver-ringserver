@@ -879,11 +879,7 @@ HandleNegotiation (ClientInfo *cinfo)
 
     // Get first layer of values (except "message")
     json_t *status = json_object_get(jsonResponse, "status");
-    json_t *sensorInfo = json_object_get(jsonResponse, "sensorInfo");
-    if(
-      status == NULL         || ( !json_is_integer(status)  ) ||
-      sensorInfo == NULL     || ( !json_is_object(sensorInfo)  )
-    ) {
+    if(status == NULL         || ( !json_is_integer(status)  )) {
       lprintf (0, "[%s] %s: Error parsing jsonResponse from AuthServer",
           cinfo->hostname, AUTH_INTERNAL_ERROR_STR);
       json_decref(jsonResponse);
@@ -895,6 +891,7 @@ HandleNegotiation (ClientInfo *cinfo)
     if (authserver_response_code == INBEHALF_VERIFICATION_SUCCESS)
     {
       // Get JSON components
+      json_t *sensorInfo = json_object_get(jsonResponse, "sensorInfo");
       json_t *username = json_object_get(sensorInfo, "username");
       json_t *role = json_object_get(sensorInfo, "role");
       json_t *exp_ptr = json_object_get(sensorInfo, "tokenExp");
@@ -902,6 +899,7 @@ HandleNegotiation (ClientInfo *cinfo)
 
       // Check expected data types
       if(
+        sensorInfo == NULL     || ( !json_is_object(sensorInfo)  ) ||
         username == NULL       || ( !json_is_string(username)    ) ||
         role == NULL           || ( !json_is_string(role)        ) ||
         exp_ptr == NULL        || ( !json_is_integer(exp_ptr)    ) ||
@@ -911,7 +909,7 @@ HandleNegotiation (ClientInfo *cinfo)
 
         lprintf (0, "[%s] %s: Error parsing sensorInfo from AuthServer response",
             cinfo->hostname, AUTH_INTERNAL_ERROR_STR);
-                                   //
+
         snprintf (sendbuffer, sizeof (sendbuffer), "%s(%d): RingServer encountered an error",
             AUTH_INTERNAL_ERROR_STR, AUTH_INTERNAL_ERROR);
         if (SendPacket (cinfo, "ERROR", sendbuffer, 0, 1, 1)){
