@@ -1121,6 +1121,7 @@ HandleWrite (ClientInfo *cinfo)
   char flags[100];
   int nread;
   int newstream = 0;
+  int packet_duplicate = 0;
   int rv;
 
   MSRecord *msr = 0;
@@ -1274,6 +1275,26 @@ HandleWrite (ClientInfo *cinfo)
           msr_free (&msr);
       }
     }
+  }
+
+  /* Check if packet already has an overlap in the Ring */
+  packet_duplicate = CheckIfDuplicate(cinfo->clientid, cinfo->ringparams, &cinfo->packet);
+  if (packet_duplicate){
+    if (packet_duplicate == -1){
+      lprintf (1, "[%s]: Error encountered in CheckIfDuplicate()", cinfo->hostname);
+      return -1;
+    }
+
+    // Respond with packet dropped if it's a duplicate
+    // TODO: change error code here and in slink2dali
+    lprintf (1, "[%s] %s: Dropring duplicate packet on %s",
+             cinfo->hostname, WRITE_STREAM_UNAUTHORIZED_ERROR_STR, streamid);
+    snprintf (replystr, sizeof (replystr), "%s(%d): Dropping duplicate packet on %s",
+        WRITE_STREAM_UNAUTHORIZED_ERROR_STR, WRITE_STREAM_UNAUTHORIZED_ERROR, streamid);
+    if (SendPacket (cinfo, "ERROR", replystr, 0, 1, 1))
+      return -1;
+
+    return 0; // don't disconnect
   }
 
   /* Add the packet to the ring */

@@ -136,6 +136,7 @@ extern int RingInitialize (char *ringfilename, char *streamfilename,
 			   uint8_t mmapflag, uint8_t volatileflag,
 			   int *ringfd, RingParams **ringparams);
 extern int RingShutdown (int ringfd, char *streamfilename, RingParams *ringparams);
+extern int CheckIfDuplicate(char* hostname, RingParams *ringparams, RingPacket *packet);
 extern int RingWrite (RingParams *ringparams, RingPacket *packet,
 		      char *packetdata, uint32_t datasize);
 extern int64_t RingRead (RingReader *reader, int64_t reqid,
