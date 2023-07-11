@@ -689,6 +689,7 @@ CheckIfDuplicate(char* hostname, RingParams *ringparams, RingPacket *packet)
     return 0;
   }
 
+  /*
   // Check start and end time
   char latestdatastarttime[50];
   char latestdataendtime[50];
@@ -704,6 +705,7 @@ CheckIfDuplicate(char* hostname, RingParams *ringparams, RingPacket *packet)
   lprintf(0, "[%s] %s new-datastart:  %s | %lu",hostname, packet->streamid, packetdatastarttime, packet->datastart);
   lprintf(0, "[%s] %s new-dataend:    %s | %lu",hostname, packet->streamid, packetdataendtime, packet->dataend);
   lprintf(0, "\n");
+  */
 
   // NOTE: hptime_t is microseconds timestamp
   if(packet->datastart >= stream->latestdetime)

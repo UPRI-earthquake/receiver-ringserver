@@ -1228,7 +1228,7 @@ HandleWrite (ClientInfo *cinfo)
   /* Drop packet if unauthorized to write on this stream */ 
   if (drop_packet)
   {
-      lprintf (1, "[%s] %s: Dropping packet. Client not authorized to WRITE on streamid: %s",
+      lprintf (3, "[%s] %s: Dropping packet. Client not authorized to WRITE on streamid: %s",
                cinfo->hostname, WRITE_STREAM_UNAUTHORIZED_ERROR_STR, streamid);
       snprintf (replystr, sizeof (replystr), "%s(%d): Dropping packet. You are not authorized to WRITE on %s",
           WRITE_STREAM_UNAUTHORIZED_ERROR_STR, WRITE_STREAM_UNAUTHORIZED_ERROR, streamid);
@@ -1286,11 +1286,10 @@ HandleWrite (ClientInfo *cinfo)
     }
 
     // Respond with packet dropped if it's a duplicate
-    // TODO: change error code here and in slink2dali
-    lprintf (1, "[%s] %s: Dropring duplicate packet on %s",
-             cinfo->hostname, WRITE_STREAM_UNAUTHORIZED_ERROR_STR, streamid);
+    lprintf (3, "[%s] %s: Dropping duplicate packet on %s",
+             cinfo->hostname, WRITE_DUPLICATE_PACKET_ERROR_STR, streamid);
     snprintf (replystr, sizeof (replystr), "%s(%d): Dropping duplicate packet on %s",
-        WRITE_STREAM_UNAUTHORIZED_ERROR_STR, WRITE_STREAM_UNAUTHORIZED_ERROR, streamid);
+        WRITE_DUPLICATE_PACKET_ERROR_STR, WRITE_DUPLICATE_PACKET_ERROR, streamid);
     if (SendPacket (cinfo, "ERROR", replystr, 0, 1, 1))
       return -1;
 
