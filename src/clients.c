@@ -438,11 +438,6 @@ ClientThread (void *arg)
     pcre_free (cinfo->reader->reject);
   if (cinfo->reader->reject_extra)
     pcre_free (cinfo->reader->reject_extra);
-  if (cinfo->jwttoken){
-    jwt_free (cinfo->jwttoken);
-  }
-  if (cinfo->writepattern)
-    pcre_free (cinfo->writepattern);
 
   /* Release AUHORIZATION variables */
   if (cinfo->authorized){

@@ -827,10 +827,6 @@ HandleNegotiation (ClientInfo *cinfo)
     char *jwt_str = NULL;
     struct MemoryStruct response;
 
-    if (cinfo->jwttoken){ // Erase any recently stored token for this connection
-      jwt_free( cinfo->jwttoken);
-    }
-
     // Allocate memory for jwt holder
     if (!(jwt_str = (char *)malloc (size + 1)))
     {
