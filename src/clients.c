@@ -451,7 +451,8 @@ ClientThread (void *arg)
     free(cinfo->role);
   }
   if (cinfo->writepatterns){
-    for(int i=0; i < cinfo->writepattern_count; i++){
+    int i;
+    for(i=0; i < cinfo->writepattern_count; i++){
       if(cinfo->writepatterns[i]){
         pcre_free (cinfo->writepatterns[i]); // free each pattern in array
       }
@@ -459,7 +460,8 @@ ClientThread (void *arg)
     free(cinfo->writepatterns); // free pointer to arry
   }
   if (cinfo->writepatterns_str){
-    for(int i=0; i < cinfo->writepattern_count; i++){
+    int i;
+    for(i=0; i < cinfo->writepattern_count; i++){
       if(cinfo->writepatterns_str[i]){
         free (cinfo->writepatterns_str[i]); // free each string in array
       }

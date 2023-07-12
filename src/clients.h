@@ -29,7 +29,6 @@ extern "C" {
 #include <pthread.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-//#include <openssl/ssl.h>
 
 #include "ring.h"
 #include "rbtree.h"

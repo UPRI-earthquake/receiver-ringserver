@@ -1169,7 +1169,8 @@ HandleWrite (ClientInfo *cinfo)
 
   /* Check if streamid of packet to be written is in array of allowed client's writepatterns*/
   found_match = 0;
-  for(int i = 0; i < cinfo->writepattern_count; i++){ // TODO: Optimize this? (see DL_MAX_NUM_STREAMID)
+  int i;
+  for(i = 0; i < cinfo->writepattern_count; i++){ // TODO: Optimize this? (see DL_MAX_NUM_STREAMID)
     pcre_result = pcre_exec (cinfo->writepatterns[i], match_extra, streamid, strlen (streamid), 0, 0, NULL, 0);
     if (match_extra) {
       pcre_free(match_extra);  // deallocate the memory
