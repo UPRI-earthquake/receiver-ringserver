@@ -35,7 +35,7 @@
 #include <sys/types.h>
 #include <time.h>
 
-#include <curl/curl.h>
+#include <curl.h>
 #include <libmseed.h>
 #include <mxml.h>
 #include <pcre.h>

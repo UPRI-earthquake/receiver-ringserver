@@ -1,5 +1,5 @@
 
-DIRS = pcre mxml libmseed src
+DIRS = curl-8.1.1 jansson-2.12 pcre mxml libmseed src
 
 # Test for Makefile/makefile and run make, run configure if it exists
 # and no Makefile does.
