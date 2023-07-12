@@ -30,6 +30,7 @@ FROM centos:7
 RUN yum upgrade -y
 # Create dir for all files
 RUN mkdir /app
+RUN mkdir /app/host-configs # docker-compose can mount host-configs to this folder
 # Copy executable and default config from build image
 COPY --from=buildenv /build/ringserver /app/ringserver
 COPY --from=buildenv /build/doc/ring.conf /app/ring.conf
