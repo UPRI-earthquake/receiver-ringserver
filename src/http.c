@@ -1927,7 +1927,8 @@ GenerateConnectionsSSE (ClientInfo *cinfo, char **connectionlist, char *path)
     AddToString (connectionlist, conninfo, selectedcount==0 ? "" : "," , 0, 8388608);
 
     // Add streamids as comma separated strings
-    for(size_t i=0; i < tcinfo->writepattern_count; i++){
+    size_t i;
+    for(i=0; i < tcinfo->writepattern_count; i++){
       snprintf(streamid, sizeof(streamid), "\"%s\"",tcinfo->writepatterns_str[i]);
       AddToString (connectionlist, streamid, i==0 ? "" : "," , 0, 8388608);
     }

@@ -438,11 +438,6 @@ ClientThread (void *arg)
     pcre_free (cinfo->reader->reject);
   if (cinfo->reader->reject_extra)
     pcre_free (cinfo->reader->reject_extra);
-  if (cinfo->jwttoken){
-    jwt_free (cinfo->jwttoken);
-  }
-  if (cinfo->writepattern)
-    pcre_free (cinfo->writepattern);
 
   /* Release AUHORIZATION variables */
   if (cinfo->authorized){
@@ -456,7 +451,8 @@ ClientThread (void *arg)
     free(cinfo->role);
   }
   if (cinfo->writepatterns){
-    for(int i=0; i < cinfo->writepattern_count; i++){
+    int i;
+    for(i=0; i < cinfo->writepattern_count; i++){
       if(cinfo->writepatterns[i]){
         pcre_free (cinfo->writepatterns[i]); // free each pattern in array
       }
@@ -464,7 +460,8 @@ ClientThread (void *arg)
     free(cinfo->writepatterns); // free pointer to arry
   }
   if (cinfo->writepatterns_str){
-    for(int i=0; i < cinfo->writepattern_count; i++){
+    int i;
+    for(i=0; i < cinfo->writepattern_count; i++){
       if(cinfo->writepatterns_str[i]){
         free (cinfo->writepatterns_str[i]); // free each string in array
       }

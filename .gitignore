@@ -1,6 +1,6 @@
 .gitignore
 jansson-*
-libjwt-*
+curl-*
 pcre
 mxml
 *.o

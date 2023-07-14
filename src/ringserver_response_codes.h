@@ -28,6 +28,7 @@
 #define WRITE_EXPIRED_TOKEN_ERROR         151  // Client's write permission (token) is expired
 #define WRITE_FORMAT_ERROR                161  // Error in write command formatting leading to parsing error
 #define WRITE_LARGE_PACKET_ERROR          171  // Packet is larger than ring packet size
+#define WRITE_DUPLICATE_PACKET_ERROR      181  // Packet has an overlap in ring, based on datastart and dataend times
 
 #define AUTH_SUCCESS                      200  // Catch all success
 #define AUTH_ERROR                        201  // Catch all error
@@ -52,6 +53,7 @@
 #define WRITE_EXPIRED_TOKEN_ERROR_STR        "WRITE_EXPIRED_TOKEN_ERROR"
 #define WRITE_FORMAT_ERROR_STR               "WRITE_FORMAT_ERROR"
 #define WRITE_LARGE_PACKET_ERROR_STR         "WRITE_LARGE_PACKET_ERROR"
+#define WRITE_DUPLICATE_PACKET_ERROR_STR     "WRITE_DUPLICATE_PACKET_ERROR"
 
 #define AUTH_SUCCESS_STR                     "AUTH_SUCCESS"
 #define AUTH_ERROR_STR                       "AUTH_ERROR"

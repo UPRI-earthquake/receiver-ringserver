@@ -35,7 +35,7 @@
 #include <sys/types.h>
 #include <time.h>
 
-#include <curl/curl.h>
+#include <curl.h>
 #include <libmseed.h>
 #include <mxml.h>
 #include <pcre.h>
@@ -827,10 +827,6 @@ HandleNegotiation (ClientInfo *cinfo)
     char *jwt_str = NULL;
     struct MemoryStruct response;
 
-    if (cinfo->jwttoken){ // Erase any recently stored token for this connection
-      jwt_free( cinfo->jwttoken);
-    }
-
     // Allocate memory for jwt holder
     if (!(jwt_str = (char *)malloc (size + 1)))
     {
@@ -1121,6 +1117,7 @@ HandleWrite (ClientInfo *cinfo)
   char flags[100];
   int nread;
   int newstream = 0;
+  int packet_duplicate = 0;
   int rv;
 
   MSRecord *msr = 0;
@@ -1172,7 +1169,8 @@ HandleWrite (ClientInfo *cinfo)
 
   /* Check if streamid of packet to be written is in array of allowed client's writepatterns*/
   found_match = 0;
-  for(int i = 0; i < cinfo->writepattern_count; i++){ // TODO: Optimize this? (see DL_MAX_NUM_STREAMID)
+  int i;
+  for(i = 0; i < cinfo->writepattern_count; i++){ // TODO: Optimize this? (see DL_MAX_NUM_STREAMID)
     pcre_result = pcre_exec (cinfo->writepatterns[i], match_extra, streamid, strlen (streamid), 0, 0, NULL, 0);
     if (match_extra) {
       pcre_free(match_extra);  // deallocate the memory
@@ -1227,7 +1225,7 @@ HandleWrite (ClientInfo *cinfo)
   /* Drop packet if unauthorized to write on this stream */ 
   if (drop_packet)
   {
-      lprintf (1, "[%s] %s: Dropping packet. Client not authorized to WRITE on streamid: %s",
+      lprintf (3, "[%s] %s: Dropping packet. Client not authorized to WRITE on streamid: %s",
                cinfo->hostname, WRITE_STREAM_UNAUTHORIZED_ERROR_STR, streamid);
       snprintf (replystr, sizeof (replystr), "%s(%d): Dropping packet. You are not authorized to WRITE on %s",
           WRITE_STREAM_UNAUTHORIZED_ERROR_STR, WRITE_STREAM_UNAUTHORIZED_ERROR, streamid);
@@ -1274,6 +1272,25 @@ HandleWrite (ClientInfo *cinfo)
           msr_free (&msr);
       }
     }
+  }
+
+  /* Check if packet already has an overlap in the Ring */
+  packet_duplicate = CheckIfDuplicate(cinfo->clientid, cinfo->ringparams, &cinfo->packet);
+  if (packet_duplicate){
+    if (packet_duplicate == -1){
+      lprintf (1, "[%s]: Error encountered in CheckIfDuplicate()", cinfo->hostname);
+      return -1;
+    }
+
+    // Respond with packet dropped if it's a duplicate
+    lprintf (3, "[%s] %s: Dropping duplicate packet on %s",
+             cinfo->hostname, WRITE_DUPLICATE_PACKET_ERROR_STR, streamid);
+    snprintf (replystr, sizeof (replystr), "%s(%d): Dropping duplicate packet on %s",
+        WRITE_DUPLICATE_PACKET_ERROR_STR, WRITE_DUPLICATE_PACKET_ERROR, streamid);
+    if (SendPacket (cinfo, "ERROR", replystr, 0, 1, 1))
+      return -1;
+
+    return 0; // don't disconnect
   }
 
   /* Add the packet to the ring */

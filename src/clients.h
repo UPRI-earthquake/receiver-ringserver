@@ -29,8 +29,6 @@ extern "C" {
 #include <pthread.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <openssl/ssl.h>
-#include <jwt.h>
 
 #include "ring.h"
 #include "rbtree.h"
@@ -102,11 +100,6 @@ typedef struct ClientInfo_s {
   double      rxbyterate;   /* Track rate of data byte reception */
   hptime_t    ratetime;     /* Time stamp for TX and RX rate calculations */
   void       *extinfo;      /* Extended client info, protocol specific */
-  // TODO: delete these?
-  jwt_t      *jwttoken;     /* JWT token for WRITE auth */
-  const char *writepatternstr; /* WRITE match as string */
-  pcre       *writepattern; /* Array of auth-to-write-streamId regexes from JWT token */
-  // end of TODO
   uint8_t    authorized;    /* Flag for authority to write, ie passed AUTHORIZATION command*/
   char       *username;     /* Username of authenticated client*/
   char       *role;         /* Role of authenticated client, sensor or brgy*/

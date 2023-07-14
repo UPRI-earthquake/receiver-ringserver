@@ -650,6 +650,87 @@ RingShutdown (int ringfd, char *streamfilename, RingParams *ringparams)
 } /* End of RingShutdown() */
 
 /***************************************************************************
+ * CheckIfDuplicate:
+ *
+ * Examines the datastart and dataend time of a packet and compares it to 
+ * the latest start and end time in the stream to see if this packet has
+ * already been written before. 
+ *
+ * Condition for being "not a duplicate":
+ * 1. When latest packet's dataend and new packet's data start are equal
+ *    prev:                  ds------de
+ *    new:                           ds------de
+ * 2. When new packet's datastart is later than latest packet's dataend
+ *    prev:                  ds------de
+ *    new:                              ds------de
+ *
+ * Returns 0 if packet is not a duplicate, 1 if duplicate, -1 if error.
+ *
+ * NOTE:
+ * This routine will always write the latest available packet. This may
+ * result in some packets being skipped, and hence a hole in the series
+ * of packets within the stream.
+ *
+ * Additionally, not that when the payload is a miniseed record (msr),
+ * the dataend and datastart values in the WRITE command are each acquired 
+ * by slink2dali from the msr itself. 
+ ***************************************************************************/
+
+int 
+CheckIfDuplicate(char* hostname, RingParams *ringparams, RingPacket *packet)
+{
+  RingStream *stream;
+
+  if (!ringparams || !packet)
+    return -1;
+
+  if (!(stream = GetStreamIdx (ringparams->streamidx, packet->streamid))){
+    // packet stream doesn't exist yet, not a duplicate
+    return 0;
+  }
+
+  /*
+  // Check start and end time
+  char latestdatastarttime[50];
+  char latestdataendtime[50];
+  char packetdatastarttime[50];
+  char packetdataendtime[50];
+
+  ms_hptime2mdtimestr (stream->latestdstime, latestdatastarttime, 1);
+  ms_hptime2mdtimestr (stream->latestdetime, latestdataendtime, 1);
+  ms_hptime2mdtimestr (packet->datastart, packetdatastarttime, 1);
+  ms_hptime2mdtimestr (packet->dataend, packetdataendtime, 1);
+  lprintf(1, "[%s] %s prev-datastart: %s | %lu",hostname, packet->streamid, latestdatastarttime, stream->latestdstime);
+  lprintf(0, "[%s] %s prev-dataend:   %s | %lu",hostname, packet->streamid, latestdataendtime, stream->latestdetime);
+  lprintf(0, "[%s] %s new-datastart:  %s | %lu",hostname, packet->streamid, packetdatastarttime, packet->datastart);
+  lprintf(0, "[%s] %s new-dataend:    %s | %lu",hostname, packet->streamid, packetdataendtime, packet->dataend);
+  lprintf(0, "\n");
+  */
+
+  // NOTE: hptime_t is microseconds timestamp
+  if(packet->datastart >= stream->latestdetime)
+  {
+    long time_diff_check = 1 * 1000000; // 1 second
+    long time_diff = packet->datastart - stream->latestdetime ;
+    if( time_diff > time_diff_check)
+    {
+      lprintf(1, "CheckIfDuplicate(): New packet is later than %lu seconds than the previous packet in stream %s",
+          time_diff/1000000, packet->streamid);
+    }
+
+    // New packet is exactly or much later than latest packet, not a duplicate
+    return 0;
+  }
+  else
+  {
+    // All other cases are considered duplicate
+    // ie those when new packet has an overlap with the latest packet
+    // ie those when newpacket.dataend < latestpacket.datastart
+    return 1;
+  }
+}
+
+/***************************************************************************
  * RingWrite:
  *
  * Add packet to the ring including updates to the packet and stream

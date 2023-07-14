@@ -1,5 +1,5 @@
 
-DIRS = pcre mxml libmseed src
+DIRS = curl-8.1.1 jansson-2.12 pcre mxml libmseed src
 
 # Test for Makefile/makefile and run make, run configure if it exists
 # and no Makefile does.
@@ -16,6 +16,9 @@ all clean install ::
 	    elif [ -x $$d/configure -a "$$d" = "mxml" ] ; then \
 	       echo "Running configure in $$d" ; \
 	      ( cd $$d && ./configure --disable-shared --enable-threads ) ; \
+	    elif [ -x $$d/configure -a "$$d" = "curl-8.1.1" ] ; then \
+	       echo "Running autoreconf & configure in $$d" ; \
+	      ( cd $$d && autoreconf -fi && ./configure --disable-shared --with-openssl ) ; \
 	    else \
 	      echo "Running configure in $$d" ; \
 	      ( cd $$d && ./configure ) ; \

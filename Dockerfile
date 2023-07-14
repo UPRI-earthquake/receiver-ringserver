@@ -15,6 +15,11 @@
 FROM centos:7 as buildenv
 # Install compiler
 RUN yum install -y gcc make
+# Install curl build dependencies
+RUN yum install -y autoconf libtool
+# Install curl runtime dependencies
+RUN yum install -y openssl-devel zlib-devel
+
 # Build executable
 COPY . /build
 RUN cd /build && CFLAGS="-O2" make
@@ -23,14 +28,18 @@ RUN cd /build && CFLAGS="-O2" make
 FROM centos:7
 # Install updates
 RUN yum upgrade -y
+# Create dir for all files
+RUN mkdir /app
+RUN mkdir /app/host-configs # docker-compose can mount host-configs to this folder
 # Copy executable and default config from build image
-COPY --from=buildenv /build/ringserver /ringserver
-COPY --from=buildenv /build/doc/ring.conf /ring.conf
+COPY --from=buildenv /build/ringserver /app/ringserver
+COPY --from=buildenv /build/doc/ring.conf /app/ring.conf
 # Run as non-root user
 RUN adduser ringuser && \
-    mkdir -p /data/ring && \
-    chown -R ringuser /data
-WORKDIR /data
+    mkdir /app/ring && \
+    mkdir /app/auth && \
+    chown -R ringuser /app
+WORKDIR /app
 USER ringuser
 
 # Expose default SeedLink and DataLink ports
@@ -38,7 +47,11 @@ EXPOSE 18000
 EXPOSE 16000
 
 # Default command is "ringserver"
-ENTRYPOINT [ "/ringserver" ]
+ENTRYPOINT [ "./ringserver" ]
 
 # Default arguments
-CMD [ "/ring.conf", "-L", "16000" ]
+CMD [ "./ring.conf" ]
+
+LABEL org.opencontainers.image.source="https://github.com/UPRI-earthquake/receiver-ringserver"
+LABEL org.opencontainers.image.description="Base docker image for EarthquakeHub RingServer"
+LABEL org.opencontainers.image.authors="earthquake@science.upd.edu.ph"

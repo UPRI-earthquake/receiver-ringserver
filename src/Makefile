@@ -11,9 +11,9 @@ SRCS = stack.c rbtree.c logging.c clients.c slclient.c dlclient.c \
 OBJS = $(SRCS:.c=.o)
 
 # Standard compiler parameters
-CFLAGS += -D_REENTRANT -D_POSIX_PTHREAD_SEMANTICS -I../libmseed -I../mxml -I../pcre  -I/usr/local/include
+CFLAGS += -D_REENTRANT -D_POSIX_PTHREAD_SEMANTICS -I../libmseed -I../mxml -I../pcre  -I../jansson-2.12/src -I../curl-8.1.1/include/curl
 
-LDLIBS  = ../pcre/.libs/libpcre.a ../libmseed/libmseed.a ../mxml/libmxml.a -lpthread -lssl -lcrypto -ljansson -ljwt -lcurl
+LDLIBS  = ../pcre/.libs/libpcre.a ../libmseed/libmseed.a ../mxml/libmxml.a ../jansson-2.12/src/.libs/libjansson.a ../curl-8.1.1/lib/.libs/libcurl.a -lpthread -lssl -lcrypto -lz
 
 # For SunOS/Solaris uncomment the following line
 #LDLIBS = ../pcre/.libs/libpcre.a ../libmseed/libmseed.a ../mxml/libmxml.a -lpthread -lsocket -lnsl -lrt
