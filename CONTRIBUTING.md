@@ -24,12 +24,25 @@
       ```bash
       mkdir auth
       ```
-  3. Acquire a _brgy_ account secret key from [earthquake-hub-backend](https://github.com/UPRI-earthquake/earthquake-hub-backend) and paste the string in file named `auth/secret.key` (there should be no spaces whatsoever).
-5. Edit configuration in (doc/ring.conf)[./doc/ring.conf]. It has sensible defaults but you may want to change these in particular:
+4. Acquire a _brgy_ account secret key from [earthquake-hub-backend](https://github.com/UPRI-earthquake/earthquake-hub-backend). Send a POST request to http://172.22.0.3:5000/accounts/authenticate with the following request body:
+    ```json
+    {
+        "username": "brgy",
+        "password": "testpassword",
+        "role": "brgy"
+    }
+    ```
+5. Paste the string in file named `auth/secret.key` (there should be no spaces whatsoever).
+6. Edit configuration in (doc/ring.conf)[./doc/ring.conf]. It has sensible defaults but you may want to change these in particular:
     1. `AuthServer` - HTTP endpoint for token verification on the Authentication Server
     2. `ListenPort` - TCP port where RingServer should be accessible on
     3. `RingSize` - Size of the ring buffer data structure (1 Gig by default).
-6. Run the server with verbosity=2. You may check `localhost:16000/status` on your browser to check if the server is running correctly.
+7. Run the server with verbosity=2.
    ```bash
       ./ringserver -vv doc/ring.conf
    ```
+8. You may verify if the ringserver is working correctly using any of the following:
+   - check `localhost:16000/status` on your browser
+   - `./dalitool -p <ringserver-address>` (ie localhost:16000)
+   - `./slinktool -S <net_sta> <ringserver-address>` (ie net_sta = GE_TOLI2)  
+   See more information in [slinktool](https://github.com/EarthScope/slinktool) or [dalitool](https://github.com/iris-edu/dalitool)https://github.com/iris-edu/dalitool in their respective repositories.
