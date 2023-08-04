@@ -24,7 +24,7 @@
       ```bash
       mkdir auth
       ```
-4. Acquire a _brgy_ account secret key from [earthquake-hub-backend](https://github.com/UPRI-earthquake/earthquake-hub-backend). Send a POST request to http://172.22.0.3:5000/accounts/authenticate with the following request body:
+4. Acquire a _brgy_ account secret key from [earthquake-hub-backend](https://github.com/UPRI-earthquake/earthquake-hub-backend) Make sure you have the earthquake-hub-backend running and that you have previously created this account. Send a POST request to http://172.22.0.3:5000/accounts/authenticate with the following request body:
     ```json
     {
         "username": "brgy",
