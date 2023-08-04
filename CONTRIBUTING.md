@@ -45,4 +45,4 @@
    - check `localhost:16000/status` on your browser
    - `./dalitool -p <ringserver-address>` (ie localhost:16000)
    - `./slinktool -S <net_sta> <ringserver-address>` (ie net_sta = GE_TOLI2)  
-   See more information in [slinktool](https://github.com/EarthScope/slinktool) or [dalitool](https://github.com/iris-edu/dalitool)https://github.com/iris-edu/dalitool in their respective repositories.
+   See more information in [slinktool](https://github.com/EarthScope/slinktool) or [dalitool](https://github.com/iris-edu/dalitool) in their respective repositories.
