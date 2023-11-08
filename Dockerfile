@@ -6,6 +6,9 @@
 # Run container, using host networking (may not work on non-Linux):
 #     docker run --network="host" --rm -it ringserver
 #
+# Run container with interactive shell
+#     docker run --network="host" --rm -it --entrypoint /bin/sh ringserver
+#
 # Run container, using bridge networking (likely impossible to submit data):
 #     docker run --network="bridge" -p 18000:18000 --rm -it ringserver
 
@@ -22,12 +25,16 @@ RUN yum install -y openssl-devel zlib-devel
 
 # Build executable
 COPY . /build
-RUN cd /build && CFLAGS="-O2" make
+#RUN cd /build && CFLAGS="-O2" make
+RUN cd /build && make
 
 # Build ringserver container
 FROM centos:7
 # Install updates
 RUN yum upgrade -y
+# Install debug dependencies
+RUN yum install -y valgrind
+
 # Create dir for all files
 RUN mkdir /app
 RUN mkdir /app/host-configs # docker-compose can mount host-configs to this folder
@@ -46,12 +53,12 @@ USER ringuser
 EXPOSE 18000
 EXPOSE 16000
 
-# Default command is "ringserver"
-ENTRYPOINT [ "./ringserver" ]
+# Default command
+ENTRYPOINT [ "valgrind" ]
 
 # Default arguments
-CMD [ "./ring.conf" ]
+CMD [ "./ringserver", "./ring.conf" ]
 
 LABEL org.opencontainers.image.source="https://github.com/UPRI-earthquake/receiver-ringserver"
-LABEL org.opencontainers.image.description="Base docker image for EarthquakeHub RingServer"
+LABEL org.opencontainers.image.description="Debugging docker image for EarthquakeHub RingServer"
 LABEL org.opencontainers.image.authors="earthquake@science.upd.edu.ph"

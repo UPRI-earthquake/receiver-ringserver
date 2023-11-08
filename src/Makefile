@@ -21,7 +21,7 @@ LDLIBS  = ../pcre/.libs/libpcre.a ../libmseed/libmseed.a ../mxml/libmxml.a ../ja
 all: $(BIN)
 
 $(BIN): $(OBJS)
-	$(CC) $(CFLAGS) -o ../$(BIN) $(OBJS) $(LDFLAGS) $(LDLIBS)
+	$(CC) $(CFLAGS) -g -o ../$(BIN) $(OBJS) $(LDFLAGS) $(LDLIBS)
 
 clean:
 	rm -f $(OBJS) ../$(BIN)

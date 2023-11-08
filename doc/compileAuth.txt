@@ -39,6 +39,7 @@ sudo apt-get install libjwt-dev libjansson-dev
 # you may want to put that in your bashrc
 
 # libcurl (required by https request)
+# note when building via docker, Makefile should not exist in curl directory
 1. download from github release into dir: https://github.com/curl/curl/releases/tag/curl-8_1_1
     1. wget https://github.com/curl/curl/archive/refs/tags/curl-8_1_1.tar.gz
     2. tar xzf curl-8_1_1.tar.gz
